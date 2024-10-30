@@ -1,0 +1,5 @@
+torch~=2.4.1
+numpy~=2.1.1
+nibabel~=5.3.2
+simpleitk~=2.4.0
+torchvision~=0.19.1
