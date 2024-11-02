@@ -2,104 +2,108 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DoubleConv(nn.Module):
+class DoubleConv3D(nn.Module):
+    """(Convolution => [BN] => ReLU) * 2"""
+
     def __init__(self, in_channels, out_channels):
-        super(DoubleConv, self).__init__()
+        super(DoubleConv3D, self).__init__()
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm3d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm3d(out_channels),
             nn.ReLU(inplace=True)
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
-class Down(nn.Module):
+class Down3D(nn.Module):
+    """Downscaling with maxpool then double conv"""
 
     def __init__(self, in_channels, out_channels):
-        super(Down, self).__init__()
+        super(Down3D, self).__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(kernel_size=2),
-            DoubleConv(in_channels, out_channels)
+            nn.MaxPool3d(kernel_size=2),
+            DoubleConv3D(in_channels, out_channels)
         )
 
     def forward(self, x):
         return self.maxpool_conv(x)
 
-class Up(nn.Module):
+class Up3D(nn.Module):
+    """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, bilinear=True):
-        super(Up, self).__init__()
+    def __init__(self, in_channels, out_channels, trilinear=True):
+        super(Up3D, self).__init__()
 
-        # Check if bilinear upsampling is used
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels)
+        if trilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
+            self.conv = DoubleConv3D(in_channels, out_channels)
         else:
-            # Use transposed convolution for upsampling
-            self.up = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels, out_channels)
+            self.up = nn.ConvTranspose3d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv3D(in_channels, out_channels)
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # Adjust shape if necessary
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
+        # Padding if necessary
+        diffD = x2.size(2) - x1.size(2)
+        diffH = x2.size(3) - x1.size(3)
+        diffW = x2.size(4) - x1.size(4)
 
-        # Pad x1 to match x2's size
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
+        x1 = F.pad(x1, [diffW // 2, diffW - diffW // 2,
+                        diffH // 2, diffH - diffH // 2,
+                        diffD // 2, diffD - diffD // 2])
 
-        # Concatenate along the channels dimension
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-class OutConv(nn.Module):
+class OutConv3D(nn.Module):
+    """Final output convolution"""
 
     def __init__(self, in_channels, out_channels):
-        super(OutConv, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        super(OutConv3D, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x):
         return self.conv(x)
 
-class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=True):
-        super(UNet, self).__init__()
+class UNet3D(nn.Module):
+    """3D U-Net architecture"""
+
+    def __init__(self, n_channels, n_classes, trilinear=True):
+        super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
-        self.bilinear = bilinear
+        self.trilinear = trilinear
+
+        factor = 2 if trilinear else 1
 
         channels = [64, 128, 256, 512, 1024]
 
-        # Encoder path
-        self.inc = DoubleConv(n_channels, channels[0])
-        self.down1 = Down(channels[0], channels[1])   # Downsample to 1/2
-        self.down2 = Down(channels[1], channels[2])  # Downsample to 1/4
-        self.down3 = Down(channels[2], channels[3])  # Downsample to 1/8
-        factor = 2 if bilinear else 1
-        self.down4 = Down(channels[3], channels[4] // factor)  # Downsample to 1/16
+        self.inc = DoubleConv3D(n_channels, channels[0])
+        self.down1 = Down3D(channels[0], channels[1])
+        self.down2 = Down3D(channels[1], channels[2])
+        self.down3 = Down3D(channels[2], channels[3])
+        self.down4 = Down3D(channels[3], channels[4] // factor)
 
-        # Decoder path
-        self.up1 = Up(channels[4], channels[3] // factor, bilinear)  # Upsample to 1/8
-        self.up2 = Up(channels[3], channels[2] // factor, bilinear)   # Upsample to 1/4
-        self.up3 = Up(channels[2], channels[1] // factor, bilinear)   # Upsample to 1/2
-        self.up4 = Up(channels[1], channels[0], bilinear)              # Upsample to original size
-        self.outc = OutConv(channels[0], n_classes)            # Final output layer
+        self.up1 = Up3D(channels[4], channels[3] // factor, trilinear)
+        self.up2 = Up3D(channels[3], channels[2] // factor, trilinear)
+        self.up3 = Up3D(channels[2], channels[1] // factor, trilinear)
+        self.up4 = Up3D(channels[1], channels[0], trilinear)
+        self.outc = OutConv3D(channels[0], n_classes)
 
     def forward(self, x):
-        x1 = self.inc(x)       # Initial conv
-        x2 = self.down1(x1)    # Down 1
-        x3 = self.down2(x2)    # Down 2
-        x4 = self.down3(x3)    # Down 3
-        x5 = self.down4(x4)    # Bottleneck
+        x1 = self.inc(x)     # [B, 64, D, H, W]
+        x2 = self.down1(x1)  # [B, 128, D/2, H/2, W/2]
+        x3 = self.down2(x2)  # [B, 256, D/4, H/4, W/4]
+        x4 = self.down3(x3)  # [B, 512, D/8, H/8, W/8]
+        x5 = self.down4(x4)  # [B, 1024, D/16, H/16, W/16]
 
-        x = self.up1(x5, x4)   # Up 1
-        x = self.up2(x, x3)    # Up 2
-        x = self.up3(x, x2)    # Up 3
-        x = self.up4(x, x1)    # Up 4
-        logits = self.outc(x)  # Output
+        x = self.up1(x5, x4)  # [B, 512, D/8, H/8, W/8]
+        x = self.up2(x, x3)   # [B, 256, D/4, H/4, W/4]
+        x = self.up3(x, x2)   # [B, 128, D/2, H/2, W/2]
+        x = self.up4(x, x1)   # [B, 64, D, H, W]
+        logits = self.outc(x) # [B, n_classes, D, H, W]
         return logits
