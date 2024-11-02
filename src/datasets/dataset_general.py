@@ -72,6 +72,6 @@ class MuscleDataset(Dataset):
         else:
             # Handle other mask formats if needed
             raise NotImplementedError("Mask format not supported.")
-        # Create binary mask for liver (label 1)
-        liver_mask = (mask_data == 1).astype(np.float32)
-        return liver_mask
+        # Ensure binary mask
+        mask_data = (mask_data > 0).astype(np.float32)
+        return mask_data
