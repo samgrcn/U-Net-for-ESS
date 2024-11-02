@@ -29,8 +29,8 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # Paths to your data
-IMAGE_DIR = 'data/images/'
-MASK_DIR = 'data/masks/'
+IMAGE_DIR = '../data/images/'
+MASK_DIR = '../data/masks/'
 
 def get_file_paths(image_dir, mask_dir):
     image_paths = [os.path.join(image_dir, f) for f in sorted(os.listdir(image_dir))]
