@@ -1,11 +1,13 @@
+# main.py
+
 import os
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from models.unet import UNet3D
-from datasets.dataset import MuscleDataset
+from models.unet import UNet
+from datasets.dataset import SliceDataset
 from utils.utils import dice_coefficient
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -22,15 +24,16 @@ elif torch.cuda.is_available():
 else:
     DEVICE = torch.device('cpu')
 
-BATCH_SIZE = 1  # Adjusted for 3D data
+
+BATCH_SIZE = 16  # You can adjust this based on your GPU memory
 NUM_EPOCHS = 50
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # Paths to your data
-IMAGE_DIR = '../data/images/'
-MASK_DIR = '../data/masks/'
+IMAGE_DIR = '../data/images/'  # Update this path
+MASK_DIR = '../data/masks/'    # Update this path
 
 def get_file_paths(image_dir, mask_dir):
     image_paths = [os.path.join(image_dir, f) for f in sorted(os.listdir(image_dir))]
@@ -46,8 +49,25 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
 )
 
 # Create datasets
-train_dataset = MuscleDataset(train_img_paths, train_mask_paths)
-val_dataset = MuscleDataset(val_img_paths, val_mask_paths)
+train_dataset = SliceDataset(train_img_paths, train_mask_paths)
+val_dataset = SliceDataset(val_img_paths, val_mask_paths)
+
+# Test data loading
+sample_image, sample_mask = train_dataset[5]
+print(f"Sample image shape: {sample_image.shape}")
+print(f"Sample mask shape: {sample_mask.shape}")
+
+image = sample_image.numpy()[0]  # Remove channel dimension
+mask = sample_mask.numpy()[0]
+
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.imshow(image, cmap='gray')
+plt.title('Input Image')
+plt.subplot(1, 2, 2)
+plt.imshow(mask, cmap='gray')
+plt.title('Ground Truth Mask')
+plt.show()
 
 # Create data loaders
 train_loader = DataLoader(
@@ -59,8 +79,9 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
+
 # Initialize model
-model = UNet3D(n_channels=1, n_classes=1, trilinear=True).to(DEVICE)
+model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
 
 # Loss function
 criterion = nn.BCEWithLogitsLoss()
