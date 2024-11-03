@@ -1,10 +1,7 @@
-# main.py
-
 import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from models.unet import UNet
 from datasets.dataset import SliceDataset
@@ -12,20 +9,15 @@ from utils.utils import dice_coefficient
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import logging
+import matplotlib.pyplot as plt  # Import for plotting
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 # Configurations and Hyperparameters
-if torch.backends.mps.is_available():
-    DEVICE = torch.device('mps')
-elif torch.cuda.is_available():
-    DEVICE = torch.device('cuda')
-else:
-    DEVICE = torch.device('cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-
-BATCH_SIZE = 16  # You can adjust this based on your GPU memory
+BATCH_SIZE = 16  # Adjust based on your GPU memory
 NUM_EPOCHS = 50
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 4
@@ -52,23 +44,6 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
 train_dataset = SliceDataset(train_img_paths, train_mask_paths)
 val_dataset = SliceDataset(val_img_paths, val_mask_paths)
 
-# Test data loading
-sample_image, sample_mask = train_dataset[5]
-print(f"Sample image shape: {sample_image.shape}")
-print(f"Sample mask shape: {sample_mask.shape}")
-
-image = sample_image.numpy()[0]  # Remove channel dimension
-mask = sample_mask.numpy()[0]
-
-plt.figure(figsize=(12, 6))
-plt.subplot(1, 2, 1)
-plt.imshow(image, cmap='gray')
-plt.title('Input Image')
-plt.subplot(1, 2, 2)
-plt.imshow(mask, cmap='gray')
-plt.title('Ground Truth Mask')
-plt.show()
-
 # Create data loaders
 train_loader = DataLoader(
     train_dataset, batch_size=BATCH_SIZE, shuffle=True,
@@ -79,9 +54,8 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
-
 # Initialize model
-model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
+model = UNet(n_channels=3, n_classes=1, bilinear=True).to(DEVICE)
 
 # Loss function
 criterion = nn.BCEWithLogitsLoss()
@@ -118,13 +92,13 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item()
+        running_loss += loss.item() * images.size(0)  # Multiply by batch size
 
         # Update progress bar
         loop.set_description(f"Training")
         loop.set_postfix(loss=loss.item())
 
-    epoch_loss = running_loss / len(loader)
+    epoch_loss = running_loss / len(loader.dataset)
     return epoch_loss
 
 def evaluate(model, loader, criterion, device):
@@ -139,22 +113,27 @@ def evaluate(model, loader, criterion, device):
 
             outputs = model(images)
             loss = criterion(outputs, masks)
-            val_loss += loss.item()
+            val_loss += loss.item() * images.size(0)  # Multiply by batch size
 
             # Calculate Dice score
             dice = dice_coefficient(outputs, masks)
-            dice_score += dice.item()
+            dice_score += dice.item() * images.size(0)
 
             # Update progress bar
             loop.set_description(f"Validation")
             loop.set_postfix(loss=loss.item(), dice=dice.item())
 
-    avg_loss = val_loss / len(loader)
-    avg_dice = dice_score / len(loader)
+    avg_loss = val_loss / len(loader.dataset)
+    avg_dice = dice_score / len(loader.dataset)
     return avg_loss, avg_dice
 
 def main():
     best_val_dice = 0.0
+
+    # Lists to store metrics
+    train_losses = []
+    val_losses = []
+    val_dices = []
 
     for epoch in range(NUM_EPOCHS):
         logging.info(f"Epoch [{epoch+1}/{NUM_EPOCHS}]")
@@ -162,10 +141,13 @@ def main():
         # Training
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
         logging.info(f"Training Loss: {train_loss:.4f}")
+        train_losses.append(train_loss)
 
         # Validation
         val_loss, val_dice = evaluate(model, val_loader, criterion, DEVICE)
         logging.info(f"Validation Loss: {val_loss:.4f}, Validation Dice: {val_dice:.4f}")
+        val_losses.append(val_loss)
+        val_dices.append(val_dice)
 
         # Step the scheduler
         scheduler.step(val_loss)
@@ -188,6 +170,27 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'val_dice': val_dice,
             }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
+
+    # Plot the metrics after training
+    epochs = range(1, NUM_EPOCHS + 1)
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, 'b', label='Training loss')
+    plt.plot(epochs, val_losses, 'r', label='Validation loss')
+    plt.title('Loss over epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, val_dices, 'g', label='Validation Dice')
+    plt.title('Validation Dice over epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Dice Coefficient')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == '__main__':
     main()
