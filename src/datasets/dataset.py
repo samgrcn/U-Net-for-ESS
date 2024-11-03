@@ -7,14 +7,12 @@ import pydicom
 
 class SliceDataset(Dataset):
     def __init__(self, image_paths, mask_paths):
-        """
-        Args:
-            image_paths (list): List of paths to image files (NIfTI or DICOM directories).
-            mask_paths (list): List of paths to mask files (NIfTI or DICOM directories).
-        """
         self.image_slices = []
         self.mask_slices = []
+        self.slice_indices = []  # To keep track of slice positions within volumes
+        self.volume_start_indices = []  # Indices where each new volume starts
 
+        current_index = 0
         for img_path, mask_path in zip(image_paths, mask_paths):
             # Load image slices
             image_slices = self.load_slices(img_path, is_mask=False)
@@ -25,6 +23,11 @@ class SliceDataset(Dataset):
             # Append slices to the dataset lists
             self.image_slices.extend(image_slices)
             self.mask_slices.extend(mask_slices)
+            # Record the indices
+            num_slices = len(image_slices)
+            self.slice_indices.extend([(current_index + i) for i in range(num_slices)])
+            self.volume_start_indices.append(current_index)
+            current_index += num_slices
 
     def __len__(self):
         return len(self.image_slices)
@@ -33,24 +36,29 @@ class SliceDataset(Dataset):
         image = self.image_slices[idx]
         mask = self.mask_slices[idx]
 
-        # Normalize image to [0, 1]
-        image = (image - np.min(image)) / (np.max(image) - np.min(image))
+        # Get previous and next slices if available, handle volume boundaries
+        prev_idx = idx - 1 if idx - 1 >= 0 and (idx - 1) in self.slice_indices else idx
+        next_idx = idx + 1 if idx + 1 < len(self.image_slices) and (idx + 1) in self.slice_indices else idx
+
+        # Check for volume boundaries
+        if idx in self.volume_start_indices:
+            prev_idx = idx  # At the start of a volume, use the current slice as previous
+        if (idx + 1) in self.volume_start_indices:
+            next_idx = idx  # At the end of a volume, use the current slice as next
+
+        prev_image = self.image_slices[prev_idx]
+        next_image = self.image_slices[next_idx]
+
+        # Stack slices to create a multi-channel image
+        image = np.stack([prev_image, image, next_image], axis=0)  # Shape: [3, H, W]
+
         # Convert to tensors
-        image = torch.from_numpy(image).unsqueeze(0).float()  # Shape: [1, H, W]
-        mask = torch.from_numpy(mask).unsqueeze(0).float()
+        image = torch.from_numpy(image).float()
+        mask = torch.from_numpy(mask).unsqueeze(0).float()  # Shape: [1, H, W]
 
         return image, mask
 
     def load_slices(self, path, is_mask=False):
-        """
-        Loads slices from a NIfTI file or DICOM directory.
-        Args:
-            path (str): Path to NIfTI file or DICOM directory.
-            is_mask (bool): Whether the path is for a mask.
-        Returns:
-            List of 2D numpy arrays.
-        """
-        slices = []
         if os.path.isdir(path):
             # Load DICOM slices
             slices = self.load_dicom_slices(path)
@@ -62,32 +70,31 @@ class SliceDataset(Dataset):
         return slices
 
     def load_dicom_slices(self, dicom_dir):
-        # Get all DICOM file paths
         dicom_files = [os.path.join(dicom_dir, f) for f in os.listdir(dicom_dir) if f.endswith('.dcm')]
-        # Sort files based on InstanceNumber or SliceLocation
         dicom_files.sort(key=lambda x: int(pydicom.dcmread(x).InstanceNumber))
-        # Load slices
         slices = []
         for file in dicom_files:
             ds = pydicom.dcmread(file)
             image = ds.pixel_array.astype(np.float32)
+            # Normalize image to [0, 1]
+            image = (image - np.min(image)) / (np.max(image) - np.min(image))
             slices.append(image)
         return slices  # List of 2D arrays
 
     def load_nifti_slices(self, nifti_path, is_mask=False):
         img = nib.load(nifti_path)
         data = img.get_fdata()
-        # print(f"Original data shape: {data.shape}")  # Debug print
+        # Correct orientation if necessary
+        # data = np.rot90(data, k=-1, axes=(0, 1))  # Adjust axes if needed
 
         # For masks, create binary masks if necessary
         if is_mask:
-            # Assuming liver label is 1
-            data = (data == 1).astype(np.float32)
+            data = (data > 0).astype(np.float32)
         else:
             data = data.astype(np.float32)
             # Normalize image data
             data = (data - np.min(data)) / (np.max(data) - np.min(data))
 
-        # Slicing along the first dimension (Z-axis)
+        # Slicing along the third dimension (Z-axis)
         slices = [data[:, :, i] for i in range(data.shape[2])]
-        return slices  # List of 2D arrays
+        return slices
