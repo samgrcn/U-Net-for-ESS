@@ -84,17 +84,17 @@ class SliceDataset(Dataset):
     def load_nifti_slices(self, nifti_path, is_mask=False):
         img = nib.load(nifti_path)
         data = img.get_fdata()
-        # Correct orientation if necessary
-        # data = np.rot90(data, k=-1, axes=(0, 1))  # Adjust axes if needed
+        print(f"Original data shape: {data.shape}")  # Debug print
 
-        # For masks, create binary masks if necessary
+        # For masks, create binary masks for the liver
         if is_mask:
-            data = (data > 0).astype(np.float32)
+            liver_label = 1  # Adjust if your liver label is different
+            data = (data == liver_label).astype(np.float32)
         else:
             data = data.astype(np.float32)
-            # Normalize image data
+            # Normalize image data to [0, 1]
             data = (data - np.min(data)) / (np.max(data) - np.min(data))
 
-        # Slicing along the third dimension (Z-axis)
+        # Extract slices along the third dimension (Z-axis)
         slices = [data[:, :, i] for i in range(data.shape[2])]
         return slices

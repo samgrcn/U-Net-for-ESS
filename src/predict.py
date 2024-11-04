@@ -15,25 +15,30 @@ def load_nifti_image(nifti_path):
     return data, img.affine
 
 def load_model(checkpoint_path, device):
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet(n_channels=3, n_classes=1, bilinear=True).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
     print("Model loaded successfully.")
     return model
 
-
 def predict_volume(model, image_data, device, threshold=0.5):
     H, W, D = image_data.shape
     predicted_masks = np.zeros((H, W, D), dtype=np.uint8)
 
     for i in range(D):
-        image_slice = image_data[:, :, i]
-        # Rotate if necessary (apply same rotation as during training)
-        # image_slice = np.rot90(image_slice, k=-1)
+        # Get neighboring slices
+        prev_slice = image_data[:, :, max(i - 1, 0)]
+        current_slice = image_data[:, :, i]
+        next_slice = image_data[:, :, min(i + 1, D - 1)]
+
+        # Stack slices to create a 3-channel input
+        image_stack = np.stack([prev_slice, current_slice, next_slice], axis=0)  # Shape: [3, H, W]
+
+        # No rotation applied
 
         # Convert to tensor
-        image_tensor = torch.from_numpy(image_slice).unsqueeze(0).unsqueeze(0).float().to(device)  # Shape: [1, 1, H, W]
+        image_tensor = torch.from_numpy(image_stack).unsqueeze(0).float().to(device)  # Shape: [1, 3, H, W]
 
         # Run the model
         with torch.no_grad():
@@ -46,8 +51,11 @@ def predict_volume(model, image_data, device, threshold=0.5):
         # Store the predicted mask
         predicted_masks[:, :, i] = predicted_mask
 
-    return predicted_masks
+        # Optional: Print progress
+        if (i + 1) % 10 == 0 or (i + 1) == D:
+            print(f"Processed slice {i + 1}/{D}")
 
+    return predicted_masks
 
 def main():
     # Device configuration
@@ -55,8 +63,8 @@ def main():
 
     # Paths to the model checkpoint and input image
     CHECKPOINT_PATH = 'outputs/checkpoints/best_model.pth.tar'  # Update if necessary
-    IMAGE_PATH = '../data/images/FLARE22_Tr_0001_0000.nii.gz'  # Update this path
-    OUTPUT_MASK_PATH = 'preds/pred.nii.gz'  # Update this path
+    IMAGE_PATH = 'path_to_your_image.nii.gz'  # Update this path
+    OUTPUT_MASK_PATH = 'path_to_save_predicted_mask.nii.gz'  # Update this path
 
     # Load the model
     model = load_model(CHECKPOINT_PATH, device)
@@ -74,24 +82,24 @@ def main():
 
     # Optional: Visualize a slice
     slice_index = image_data.shape[2] // 2  # Middle slice
-    image_slice = image_data[:, :, slice_index]
+    current_slice = image_data[:, :, slice_index]
     predicted_mask_slice = predicted_masks[:, :, slice_index]
 
     plt.figure(figsize=(18, 6))
     plt.subplot(1, 3, 1)
-    plt.imshow(image_slice, cmap='gray')
+    plt.imshow(current_slice, cmap='gray')
     plt.title('Input Image Slice')
 
     plt.subplot(1, 3, 2)
     plt.imshow(predicted_mask_slice, cmap='gray')
-    plt.title('Predicted Mask Slice')
+    plt.title('Predicted Liver Mask Slice')
 
     plt.subplot(1, 3, 3)
-    plt.imshow(image_slice, cmap='gray')
+    plt.imshow(current_slice, cmap='gray')
     plt.imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
     plt.title('Overlay')
 
     plt.show()
 
-    if __name__ == '__main__':
-        main()
+if __name__ == '__main__':
+    main()
