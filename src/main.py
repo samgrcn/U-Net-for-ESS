@@ -44,6 +44,27 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
 train_dataset = SliceDataset(train_img_paths, train_mask_paths)
 val_dataset = SliceDataset(val_img_paths, val_mask_paths)
 
+sample_image, sample_mask = train_dataset[0]
+print(f"Sample image shape: {sample_image.shape}")  # Expected shape: [3, H, W]
+print(f"Sample mask shape: {sample_mask.shape}")    # Expected shape: [1, H, W]
+
+# Visual Verification
+import matplotlib.pyplot as plt
+
+# Display the middle channel of the image (current slice)
+image = sample_image.numpy()[1]  # Middle slice
+mask = sample_mask.numpy()[0]    # Remove channel dimension
+
+plt.figure(figsize=(12, 6))
+plt.subplot(1, 2, 1)
+plt.imshow(image, cmap='gray')
+plt.title('Input Image Slice')
+
+plt.subplot(1, 2, 2)
+plt.imshow(mask, cmap='gray')
+plt.title('Liver Mask')
+plt.show()
+
 # Create data loaders
 train_loader = DataLoader(
     train_dataset, batch_size=BATCH_SIZE, shuffle=True,
