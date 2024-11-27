@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class DoubleConv(nn.Module):
-    """(Convolution => [BN] => ReLU) * 2"""
 
     def __init__(self, in_channels, out_channels):
         super(DoubleConv, self).__init__()
@@ -20,7 +19,6 @@ class DoubleConv(nn.Module):
         return self.double_conv(x)
 
 class Down(nn.Module):
-    """Downscaling with maxpool then double conv"""
 
     def __init__(self, in_channels, out_channels):
         super(Down, self).__init__()
@@ -33,12 +31,10 @@ class Down(nn.Module):
         return self.maxpool_conv(x)
 
 class Up(nn.Module):
-    """Upscaling then double conv"""
 
     def __init__(self, in_channels, out_channels, bilinear=True):
         super(Up, self).__init__()
 
-        # Check if bilinear upsampling is used
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels)
@@ -49,7 +45,6 @@ class Up(nn.Module):
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # Adjust shape if necessary
         diffY = x2.size()[2] - x1.size()[2]
         diffX = x2.size()[3] - x1.size()[3]
 
@@ -62,7 +57,6 @@ class Up(nn.Module):
         return self.conv(x)
 
 class OutConv(nn.Module):
-    """Final output convolution"""
 
     def __init__(self, in_channels, out_channels):
         super(OutConv, self).__init__()
@@ -72,7 +66,6 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 class UNet(nn.Module):
-    """2D U-Net architecture"""
 
     def __init__(self, n_channels, n_classes, bilinear=True):
         super(UNet, self).__init__()
@@ -95,15 +88,15 @@ class UNet(nn.Module):
         self.outc = OutConv(64, n_classes)
 
     def forward(self, x):
-        x1 = self.inc(x)     # [B, 64, H, W]
-        x2 = self.down1(x1)  # [B, 128, H/2, W/2]
-        x3 = self.down2(x2)  # [B, 256, H/4, W/4]
-        x4 = self.down3(x3)  # [B, 512, H/8, W/8]
-        x5 = self.down4(x4)  # [B, 1024, H/16, W/16]
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
 
-        x = self.up1(x5, x4)  # [B, 512, H/8, W/8]
-        x = self.up2(x, x3)   # [B, 256, H/4, W/4]
-        x = self.up3(x, x2)   # [B, 128, H/2, W/2]
-        x = self.up4(x, x1)   # [B, 64, H, W]
-        logits = self.outc(x) # [B, n_classes, H, W]
+        x = self.up1(x5, x4)
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        logits = self.outc(x)
         return logits

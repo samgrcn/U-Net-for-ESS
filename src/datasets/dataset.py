@@ -1,24 +1,24 @@
+# dataset.py
 import os
 import torch
 from torch.utils.data import Dataset
 import numpy as np
-import nibabel as nib  # For NIfTI files
+import nibabel as nib
 import pydicom
+from skimage.transform import resize
 
 class SliceDataset(Dataset):
-    def __init__(self, image_paths, mask_paths):
+    def __init__(self, image_paths, mask_paths, desired_size=(256, 256)):
         self.image_slices = []
         self.mask_slices = []
-        self.slice_indices = []  # To keep track of slice positions within volumes
-        self.volume_start_indices = []  # Indices where each new volume starts
+        self.slice_indices = []
+        self.volume_start_indices = []
+        self.desired_size = desired_size
 
         current_index = 0
         for img_path, mask_path in zip(image_paths, mask_paths):
-            # Load image slices
             image_slices = self.load_slices(img_path, is_mask=False)
-            # Load mask slices
             mask_slices = self.load_slices(mask_path, is_mask=True)
-            # Ensure the number of slices match
             assert len(image_slices) == len(mask_slices), f"Mismatch in number of slices between image and mask at {img_path}"
             # Append slices to the dataset lists
             self.image_slices.extend(image_slices)
@@ -40,27 +40,42 @@ class SliceDataset(Dataset):
         prev_idx = idx - 1 if idx - 1 >= 0 and (idx - 1) in self.slice_indices else idx
         next_idx = idx + 1 if idx + 1 < len(self.image_slices) and (idx + 1) in self.slice_indices else idx
 
-        # Check for volume boundaries
+        # Check for edge cases
         if idx in self.volume_start_indices:
-            prev_idx = idx  # At the start of a volume, use the current slice as previous
+            prev_idx = idx
         if (idx + 1) in self.volume_start_indices:
-            next_idx = idx  # At the end of a volume, use the current slice as next
+            next_idx = idx
 
         prev_image = self.image_slices[prev_idx]
         next_image = self.image_slices[next_idx]
 
-        # Stack slices to create a multi-channel image
-        image = np.stack([prev_image, image, next_image], axis=0)  # Shape: [3, H, W]
+        # Stack slices
+        image = np.stack([prev_image, image, next_image], axis=0)
+
+        # Resize image and mask
+        image = resize(
+            image,
+            (3, self.desired_size[0], self.desired_size[1]),
+            mode='reflect',
+            anti_aliasing=True
+        )
+        mask = resize(
+            mask,
+            (self.desired_size[0], self.desired_size[1]),
+            order=0,
+            preserve_range=True,
+            anti_aliasing=False
+        )
 
         # Convert to tensors
         image = torch.from_numpy(image).float()
-        mask = torch.from_numpy(mask).unsqueeze(0).float()  # Shape: [1, H, W]
+        mask = torch.from_numpy(mask).unsqueeze(0).float()
 
         return image, mask
 
     def load_slices(self, path, is_mask=False):
         if os.path.isdir(path):
-            # Load DICOM slices
+            # DICOM slices
             slices = self.load_dicom_slices(path)
         elif path.endswith('.nii') or path.endswith('.nii.gz'):
             # Load NIfTI slices
@@ -79,22 +94,21 @@ class SliceDataset(Dataset):
             # Normalize image to [0, 1]
             image = (image - np.min(image)) / (np.max(image) - np.min(image))
             slices.append(image)
-        return slices  # List of 2D arrays
+        return slices
 
     def load_nifti_slices(self, nifti_path, is_mask=False):
         img = nib.load(nifti_path)
         data = img.get_fdata()
-        print(f"Original data shape: {data.shape}")  # Debug print
 
-        # For masks, create binary masks for the liver
         if is_mask:
-            liver_label = 1  # Adjust if your liver label is different
-            data = (data == liver_label).astype(np.float32)
+            data = data.astype(np.float32)
+            # Binarize the mask if necessary
+            data = (data > 0).astype(np.float32)
         else:
             data = data.astype(np.float32)
             # Normalize image data to [0, 1]
             data = (data - np.min(data)) / (np.max(data) - np.min(data))
 
-        # Extract slices along the third dimension (Z-axis)
+        # Extract slices along Z-axis
         slices = [data[:, :, i] for i in range(data.shape[2])]
         return slices
