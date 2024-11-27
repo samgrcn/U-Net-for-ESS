@@ -1,3 +1,4 @@
+# main.py
 import os
 import torch
 import torch.nn as nn
@@ -9,63 +10,61 @@ from utils.utils import dice_coefficient
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import logging
-import matplotlib.pyplot as plt  # Import for plotting
+import matplotlib.pyplot as plt
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# Configurations and Hyperparameters
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-BATCH_SIZE = 16  # Adjust based on your GPU memory
-NUM_EPOCHS = 50
-LEARNING_RATE = 1e-4
+BATCH_SIZE = 8
+NUM_EPOCHS = 10
+LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
-# Paths to your data
-IMAGE_DIR = '../data/images/'  # Update this path
-MASK_DIR = '../data/masks/'    # Update this path
+# PATHS
+PATIENT_DIR = '../data/patients/'  # Update this path to your patient folders
 
-def get_file_paths(image_dir, mask_dir):
-    image_paths = [os.path.join(image_dir, f) for f in sorted(os.listdir(image_dir))]
-    mask_paths = [os.path.join(mask_dir, f) for f in sorted(os.listdir(mask_dir))]
+def get_file_paths(patient_dir):
+    patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
+    image_paths = []
+    mask_paths = []
+    for patient_path in patient_paths:
+        # List files in patient folder
+        files_in_patient = os.listdir(patient_path)
+        # Identify image file
+        image_file = None
+        for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii']:
+            if fname in files_in_patient:
+                image_file = fname
+                break
+        if image_file is None:
+            print(f"No image file found in {patient_path}")
+            continue
+        image_path = os.path.join(patient_path, image_file)
+        # Check if mask exists
+        mask_file = 'erector.nii'
+        mask_path = os.path.join(patient_path, mask_file)
+        if not os.path.exists(mask_path):
+            print(f"No mask file found in {patient_path}")
+            continue
+        image_paths.append(image_path)
+        mask_paths.append(mask_path)
     return image_paths, mask_paths
 
 # Get image and mask paths
-image_paths, mask_paths = get_file_paths(IMAGE_DIR, MASK_DIR)
+image_paths, mask_paths = get_file_paths(PATIENT_DIR)
 
-# Split data into training and validation sets
+# Split data
 train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_split(
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
-# Create datasets
+# Datasets
 train_dataset = SliceDataset(train_img_paths, train_mask_paths)
 val_dataset = SliceDataset(val_img_paths, val_mask_paths)
 
-sample_image, sample_mask = train_dataset[0]
-print(f"Sample image shape: {sample_image.shape}")  # Expected shape: [3, H, W]
-print(f"Sample mask shape: {sample_mask.shape}")    # Expected shape: [1, H, W]
-
-# Visual Verification
-import matplotlib.pyplot as plt
-
-# Display the middle channel of the image (current slice)
-image = sample_image.numpy()[1]  # Middle slice
-mask = sample_mask.numpy()[0]    # Remove channel dimension
-
-plt.figure(figsize=(12, 6))
-plt.subplot(1, 2, 1)
-plt.imshow(image, cmap='gray')
-plt.title('Input Image Slice')
-
-plt.subplot(1, 2, 2)
-plt.imshow(mask, cmap='gray')
-plt.title('Liver Mask')
-plt.show()
-
-# Create data loaders
+# Data loaders
 train_loader = DataLoader(
     train_dataset, batch_size=BATCH_SIZE, shuffle=True,
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
@@ -75,16 +74,13 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
-# Initialize model
+# MODEL
 model = UNet(n_channels=3, n_classes=1, bilinear=True).to(DEVICE)
 
-# Loss function
 criterion = nn.BCEWithLogitsLoss()
 
-# Optimizer
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-# Learning rate scheduler
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 # Directory to save model checkpoints
@@ -136,7 +132,7 @@ def evaluate(model, loader, criterion, device):
             loss = criterion(outputs, masks)
             val_loss += loss.item() * images.size(0)  # Multiply by batch size
 
-            # Calculate Dice score
+            # Dice score
             dice = dice_coefficient(outputs, masks)
             dice_score += dice.item() * images.size(0)
 
@@ -170,10 +166,9 @@ def main():
         val_losses.append(val_loss)
         val_dices.append(val_dice)
 
-        # Step the scheduler
         scheduler.step(val_loss)
 
-        # Check if this is the best model
+        # If best model so far
         if val_dice > best_val_dice:
             best_val_dice = val_dice
             save_checkpoint({
@@ -183,7 +178,7 @@ def main():
                 'val_dice': val_dice,
             }, filename='best_model.pth.tar')
 
-        # Save model every 10 epochs
+        # Saves model every 10 epochs
         if (epoch + 1) % 10 == 0:
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -192,7 +187,7 @@ def main():
                 'val_dice': val_dice,
             }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
 
-    # Plot the metrics after training
+    # Plots metrics
     epochs = range(1, NUM_EPOCHS + 1)
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
