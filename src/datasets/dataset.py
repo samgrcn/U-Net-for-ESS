@@ -1,4 +1,4 @@
-# dataset.py
+# datasets/dataset.py
 import os
 import torch
 from torch.utils.data import Dataset
@@ -36,40 +36,28 @@ class SliceDataset(Dataset):
         image = self.image_slices[idx]
         mask = self.mask_slices[idx]
 
-        # Get previous and next slices if available, handle volume boundaries
-        prev_idx = idx - 1 if idx - 1 >= 0 and (idx - 1) in self.slice_indices else idx
-        next_idx = idx + 1 if idx + 1 < len(self.image_slices) and (idx + 1) in self.slice_indices else idx
-
-        # Check for edge cases
-        if idx in self.volume_start_indices:
-            prev_idx = idx
-        if (idx + 1) in self.volume_start_indices:
-            next_idx = idx
-
-        prev_image = self.image_slices[prev_idx]
-        next_image = self.image_slices[next_idx]
-
-        # Stack slices
-        image = np.stack([prev_image, image, next_image], axis=0)
-
         # Resize image and mask
         image = resize(
             image,
-            (3, self.desired_size[0], self.desired_size[1]),
+            self.desired_size,
             mode='reflect',
             anti_aliasing=True
         )
         mask = resize(
             mask,
-            (self.desired_size[0], self.desired_size[1]),
+            self.desired_size,
             order=0,
             preserve_range=True,
             anti_aliasing=False
         )
 
+        # Add channel dimension
+        image = np.expand_dims(image, axis=0)  # Shape: [1, H, W]
+        mask = np.expand_dims(mask, axis=0)    # Shape: [1, H, W]
+
         # Convert to tensors
         image = torch.from_numpy(image).float()
-        mask = torch.from_numpy(mask).unsqueeze(0).float()
+        mask = torch.from_numpy(mask).float()
 
         return image, mask
 
