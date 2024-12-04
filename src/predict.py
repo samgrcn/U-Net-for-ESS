@@ -150,12 +150,13 @@ def main():
 
     # Get test data paths
     paris_image_paths, paris_mask_paths = get_test_data_paths(TEST_PARIS_DIR, has_masks=True)
-    belgium_image_paths = get_test_data_paths(TEST_BELGIUM_DIR, has_masks=False)
+    belgium_image_paths, belgium_mask_paths = get_test_data_paths(TEST_BELGIUM_DIR, has_masks=True)
 
     # Select the 4 test images
     paris_image_paths = paris_image_paths[:4]
     paris_mask_paths = paris_mask_paths[:4]
     belgium_image_paths = belgium_image_paths[:4]
+    belgium_mask_paths = belgium_mask_paths[:4]
 
     # Lists to hold slices for plotting
     paris_slices = []
@@ -185,9 +186,11 @@ def main():
         paris_slices.append((image_slice, mask_slice, predicted_mask_slice))
 
     # Process Belgium images
-    for idx, image_path in enumerate(belgium_image_paths):
+    for idx, (image_path, mask_path) in enumerate(zip(belgium_image_paths, belgium_mask_paths)):
         # Load image data
         image_data, affine = load_nifti_image(image_path, target_spacing)
+        # Load mask data
+        mask_data = load_nifti_mask(mask_path, target_spacing)
         # Predict mask
         predicted_masks = predict_volume(model, image_data, device, desired_size=desired_size, threshold=0.5)
         # Save predicted mask as NIfTI
@@ -199,10 +202,11 @@ def main():
         # Get middle slice
         middle_slice_idx = image_data.shape[2] // 2
         image_slice = image_data[:, :, middle_slice_idx]
+        mask_slice = mask_data[:, :, middle_slice_idx]
         predicted_mask_slice = predicted_masks[:, :, middle_slice_idx]
 
         # Collect slices for plotting
-        belgium_slices.append((image_slice, predicted_mask_slice))
+        belgium_slices.append((image_slice, mask_slice, predicted_mask_slice))
 
     # Now create plots
     num_paris = len(paris_slices)
@@ -212,20 +216,20 @@ def main():
     fig_paris, axes_paris = plt.subplots(num_paris, 4, figsize=(20, 5 * num_paris))
     for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(paris_slices):
         # Original image
-        axes_paris[idx, 0].imshow(image_slice, cmap='gray')
+        axes_paris[idx, 0].imshow(image_slice, cmap='gray', aspect='auto')
         axes_paris[idx, 0].set_title(f'Paris Patient {idx+1} - Image')
         axes_paris[idx, 0].axis('off')
         # Ground truth mask
-        axes_paris[idx, 1].imshow(mask_slice, cmap='gray')
+        axes_paris[idx, 1].imshow(mask_slice, cmap='gray', aspect='auto')
         axes_paris[idx, 1].set_title(f'Paris Patient {idx+1} - Ground Truth Mask')
         axes_paris[idx, 1].axis('off')
         # Predicted mask
-        axes_paris[idx, 2].imshow(predicted_mask_slice, cmap='gray')
+        axes_paris[idx, 2].imshow(predicted_mask_slice, cmap='gray', aspect='auto')
         axes_paris[idx, 2].set_title(f'Paris Patient {idx+1} - Predicted Mask')
         axes_paris[idx, 2].axis('off')
         # Overlay
-        axes_paris[idx, 3].imshow(image_slice, cmap='gray')
-        axes_paris[idx, 3].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
+        axes_paris[idx, 3].imshow(image_slice, cmap='Blues', alpha=0.7, aspect='auto')
+        axes_paris[idx, 3].imshow(predicted_mask_slice, cmap='Reds', alpha=0.5, aspect='auto')
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
     plt.tight_layout()
@@ -234,21 +238,25 @@ def main():
     print(f"Paris predictions plot saved at {plot_paris_path}")
 
     # Plot Belgium slices
-    fig_belgium, axes_belgium = plt.subplots(num_belgium, 3, figsize=(15, 5 * num_belgium))
-    for idx, (image_slice, predicted_mask_slice) in enumerate(belgium_slices):
+    fig_belgium, axes_belgium = plt.subplots(num_belgium, 4, figsize=(20, 5 * num_belgium))
+    for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(belgium_slices):
         # Original image
-        axes_belgium[idx, 0].imshow(image_slice, cmap='gray')
+        axes_belgium[idx, 0].imshow(image_slice, cmap='gray', aspect='auto')
         axes_belgium[idx, 0].set_title(f'Belgium Patient {idx+1} - Image')
         axes_belgium[idx, 0].axis('off')
-        # Predicted mask
-        axes_belgium[idx, 1].imshow(predicted_mask_slice, cmap='gray')
-        axes_belgium[idx, 1].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
+        # Ground truth mask
+        axes_belgium[idx, 1].imshow(mask_slice, cmap='gray', aspect='auto')
+        axes_belgium[idx, 1].set_title(f'Belgium Patient {idx+1} - Ground Truth Mask')
         axes_belgium[idx, 1].axis('off')
-        # Overlay
-        axes_belgium[idx, 2].imshow(image_slice, cmap='gray')
-        axes_belgium[idx, 2].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
-        axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Overlay')
+        # Predicted mask
+        axes_belgium[idx, 2].imshow(predicted_mask_slice, cmap='gray', aspect='auto')
+        axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
         axes_belgium[idx, 2].axis('off')
+        # Overlay
+        axes_belgium[idx, 3].imshow(image_slice, cmap='Blues', alpha=0.7, aspect='auto')
+        axes_belgium[idx, 3].imshow(predicted_mask_slice, cmap='Reds', alpha=0.5, aspect='auto')
+        axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
+        axes_belgium[idx, 3].axis('off')
     plt.tight_layout()
     plot_belgium_path = os.path.join(OUTPUT_DIR, 'belgium_predictions.png')
     plt.savefig(plot_belgium_path)
