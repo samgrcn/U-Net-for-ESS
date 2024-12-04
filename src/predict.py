@@ -60,8 +60,8 @@ def main():
 
     # PATHS
     CHECKPOINT_PATH = 'outputs/checkpoints/best_model.pth.tar'  # Update if necessary
-    IMAGE_PATH = '../data/images_unlabeled/601_water_ax_idiq_bh_inspi_dos_l3.nii'  # Update this path
-    OUTPUT_MASK_PATH = 'outputs/preds/pred_belgium2.nii.gz'  # Update this path
+    IMAGE_PATH = '../data/images_unlabeled/52/ mDIXON-Quant_BH_v3.nii'  # Update this path
+    OUTPUT_MASK_PATH = 'outputs/preds/pred_52.nii.gz'  # Update this path
 
     model = load_model(CHECKPOINT_PATH, device)
 
@@ -97,3 +97,10 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    # for each plot 4 paris and 4 belgium;
+    # rescale belgium image to test
+    # train the model with only box
+    # compare 1 slice vs 3
+    # if french fat fraction and water? train the 3 channels with water, fat and fat fraction
+    # normalize the images
