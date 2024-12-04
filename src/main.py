@@ -23,7 +23,7 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/patients/'  # Update this path to your patient folders
+PATIENT_DIR = '../data/paris_data/'  # Update this path to your patient folders
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
@@ -60,9 +60,11 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
+target_spacing = (3.0, 1.7188, 1.7188)
+
 # Datasets
-train_dataset = SliceDataset(train_img_paths, train_mask_paths)
-val_dataset = SliceDataset(val_img_paths, val_mask_paths)
+train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
+val_dataset = SliceDataset(val_img_paths, val_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
 
 # Data loaders
 train_loader = DataLoader(
