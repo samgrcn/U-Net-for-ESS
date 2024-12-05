@@ -140,10 +140,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet/best_model.pth.tar'  # Update with your checkpoint path
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel/checkpoint_epoch_20.pth.tar'  # Update with your checkpoint path
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet/' # UPDATE
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel/' # UPDATE
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Define target_spacing and desired_size
@@ -238,8 +238,8 @@ def main():
         overlay = np.zeros((*image_slice.shape, 3))
         # Overlap (both masks) in green
         overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
-        # Ground truth mask only in yellow
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
+        # Ground truth mask only in blue
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
         axes_paris[idx, 3].imshow(overlay, alpha=0.22, aspect='auto')
@@ -271,8 +271,8 @@ def main():
         overlay = np.zeros((*image_slice.shape, 3))
         # Overlap (both masks) in green
         overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
-        # Ground truth mask only in yellow
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
+        # Ground truth mask only in blue
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
         axes_belgium[idx, 3].imshow(overlay, alpha=0.22, aspect='auto')
