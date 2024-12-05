@@ -4,15 +4,9 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 import nibabel as nib
-import pydicom
 from skimage.transform import resize
 from scipy.ndimage import zoom
-
-def normalize(img: np.ndarray) -> np.ndarray:
-    """Percentile-based normalization of the gray levels."""
-    img = img.astype("float32") / np.percentile(img, 99)
-    img[img > 1.0] = 0.975
-    return img
+from utils.utils import normalize
 
 class SliceDataset(Dataset):
     def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(3.0, 1.7188, 1.7188)):
@@ -33,16 +27,31 @@ class SliceDataset(Dataset):
         return len(self.image_slices)
 
     def __getitem__(self, idx):
-        image = self.image_slices[idx]
+        # Get indices for neighboring slices
+        idx_prev = max(idx - 1, 0)
+        idx_next = min(idx + 1, len(self.image_slices) - 1)
+
+        # Get the three slices
+        image_prev = self.image_slices[idx_prev]
+        image_current = self.image_slices[idx]
+        image_next = self.image_slices[idx_next]
+
+        # Stack them to create a 3-channel image
+        image = np.stack([image_prev, image_current, image_next], axis=0)  # Shape: (3, H, W)
+
+        # Get the mask for the current slice
         mask = self.mask_slices[idx]
 
         # Resize image and mask to desired_size
-        image = resize(
-            image,
-            self.desired_size,
-            mode='reflect',
-            anti_aliasing=True
-        )
+        resized_image = np.zeros((3, *self.desired_size), dtype=image.dtype)
+        for c in range(3):
+            resized_image[c] = resize(
+                image[c],
+                self.desired_size,
+                mode='reflect',
+                anti_aliasing=True
+            )
+
         mask = resize(
             mask,
             self.desired_size,
@@ -51,13 +60,9 @@ class SliceDataset(Dataset):
             anti_aliasing=False
         )
 
-        # Add channel dimension
-        image = np.expand_dims(image, axis=0)
-        mask = np.expand_dims(mask, axis=0)
-
         # Convert to tensors
-        image = torch.from_numpy(image).float()
-        mask = torch.from_numpy(mask).float()
+        image = torch.from_numpy(resized_image).float()
+        mask = torch.from_numpy(mask).float().unsqueeze(0)  # Add channel dimension
 
         return image, mask
 
@@ -75,7 +80,7 @@ class SliceDataset(Dataset):
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
         else:
-            data.astype(np.float32)
+            data = data.astype(np.float32)
             data = normalize(data)
 
         # Resample volume to target_spacing

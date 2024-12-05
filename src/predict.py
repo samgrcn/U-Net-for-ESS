@@ -5,7 +5,6 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 from models.unet import UNet
-from scipy.ndimage import zoom
 from skimage.transform import resize
 from utils.utils import normalize
 
@@ -32,6 +31,9 @@ def get_test_data_paths(test_dir, has_masks=True):
                 if fname in files_in_patient:
                     mask_file = fname
                     break
+            if mask_file is None:
+                print(f"No mask file found in {patient_dir}")
+                continue
             mask_path = os.path.join(patient_dir, mask_file)
             if not os.path.exists(mask_path):
                 print(f"No mask file found in {patient_dir}")
@@ -42,54 +44,27 @@ def get_test_data_paths(test_dir, has_masks=True):
     else:
         return image_paths
 
-def load_nifti_image(nifti_path, target_spacing):
+def load_nifti_image(nifti_path):
     img = nib.load(nifti_path)
     data = img.get_fdata()
-    header = img.header
     affine = img.affine
 
-    # Get current voxel spacing
-    voxel_spacing = header.get_zooms()  # (X, Y, Z)
-    voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
-
-    data = data.astype(np.float32)
     data = normalize(data)
 
-    # Resample volume to target_spacing
-    zoom_factors = (
-        voxel_spacing[0] / target_spacing[0],
-        voxel_spacing[1] / target_spacing[1],
-        voxel_spacing[2] / target_spacing[2]
-    )
-    data_resampled = zoom(data, zoom_factors, order=1)
+    return data, affine
 
-    return data_resampled, affine
-
-def load_nifti_mask(nifti_path, target_spacing):
+def load_nifti_mask(nifti_path):
     img = nib.load(nifti_path)
     data = img.get_fdata()
-    header = img.header
-
-    # Get current voxel spacing
-    voxel_spacing = header.get_zooms()
-    voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
 
     data = data.astype(np.float32)
     # Binarize mask
     data = (data > 0).astype(np.uint8)
 
-    # Resample volume to target_spacing
-    zoom_factors = (
-        voxel_spacing[0] / target_spacing[0],
-        voxel_spacing[1] / target_spacing[1],
-        voxel_spacing[2] / target_spacing[2]
-    )
-    data_resampled = zoom(data, zoom_factors, order=0)  # Nearest-neighbor interpolation for masks
-
-    return data_resampled
+    return data
 
 def load_model(checkpoint_path, device):
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet(n_channels=3, n_classes=1, bilinear=True).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
@@ -101,18 +76,29 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
     predicted_masks = np.zeros((H, W, D), dtype=np.uint8)
 
     for i in range(D):
-        current_slice = image_data[:, :, i]
+        idx_prev = max(i - 1, 0)
+        idx_next = min(i + 1, D - 1)
 
-        # Resize slice to desired_size
-        image_resized = resize(
-            current_slice,
-            desired_size,
-            mode='reflect',
-            anti_aliasing=True
-        )
+        # Get the three slices
+        slice_prev = image_data[:, :, idx_prev]
+        slice_current = image_data[:, :, i]
+        slice_next = image_data[:, :, idx_next]
 
-        # Add batch and channel dimensions
-        image_tensor = torch.from_numpy(image_resized).unsqueeze(0).unsqueeze(0).float().to(device)
+        # Stack them to create a 3-channel image
+        image = np.stack([slice_prev, slice_current, slice_next], axis=0)  # Shape: (3, H, W)
+
+        # Resize each channel
+        resized_image = np.zeros((3, *desired_size), dtype=image.dtype)
+        for c in range(3):
+            resized_image[c] = resize(
+                image[c],
+                desired_size,
+                mode='reflect',
+                anti_aliasing=True
+            )
+
+        # Convert to tensor
+        image_tensor = torch.from_numpy(resized_image).unsqueeze(0).float().to(device)  # Shape: (1, 3, H, W)
 
         with torch.no_grad():
             output = model(image_tensor)
@@ -123,7 +109,7 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
         # Resize mask back to original slice size
         predicted_mask_original_size = resize(
             predicted_mask_resized,
-            (current_slice.shape[0], current_slice.shape[1]),
+            (H, W),
             order=0,
             preserve_range=True,
             anti_aliasing=False
@@ -144,11 +130,10 @@ def main():
     CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel/checkpoint_epoch_20.pth.tar'  # Update with your checkpoint path
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel/' # UPDATE
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel/'  # Ensure this is correct
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Define target_spacing and desired_size
-    target_spacing = (3.0, 1.7188, 1.7188)  # (Z, Y, X)
+    # Define desired_size
     desired_size = (256, 256)
 
     model = load_model(CHECKPOINT_PATH, device)
@@ -170,9 +155,9 @@ def main():
     # Process Paris images
     for idx, (image_path, mask_path) in enumerate(zip(paris_image_paths, paris_mask_paths)):
         # Load image data
-        image_data, affine = load_nifti_image(image_path, target_spacing)
+        image_data, affine = load_nifti_image(image_path)
         # Load mask data
-        mask_data = load_nifti_mask(mask_path, target_spacing)
+        mask_data = load_nifti_mask(mask_path)
         # Predict mask
         predicted_masks = predict_volume(model, image_data, device, desired_size=desired_size, threshold=0.5)
         # Save predicted mask as NIfTI
@@ -193,9 +178,9 @@ def main():
     # Process Belgium images
     for idx, (image_path, mask_path) in enumerate(zip(belgium_image_paths, belgium_mask_paths)):
         # Load image data
-        image_data, affine = load_nifti_image(image_path, target_spacing)
+        image_data, affine = load_nifti_image(image_path)
         # Load mask data
-        mask_data = load_nifti_mask(mask_path, target_spacing)
+        mask_data = load_nifti_mask(mask_path)
         # Predict mask
         predicted_masks = predict_volume(model, image_data, device, desired_size=desired_size, threshold=0.5)
         # Save predicted mask as NIfTI
@@ -213,10 +198,12 @@ def main():
         # Collect slices for plotting
         belgium_slices.append((image_slice, mask_slice, predicted_mask_slice))
 
+    # Define brightness factor for Belgium images
+    BELGIUM_BRIGHTNESS_FACTOR = 1.2  # Adjust this value as needed
+
     # Now create plots
     num_paris = len(paris_slices)
     num_belgium = len(belgium_slices)
-
 
     # Plot Paris slices
     fig_paris, axes_paris = plt.subplots(num_paris, 4, figsize=(20, 5 * num_paris))
@@ -243,6 +230,7 @@ def main():
         overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
+        # Display overlay with specified alpha
         axes_paris[idx, 3].imshow(overlay, alpha=0.22, aspect='auto')
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
@@ -255,7 +243,8 @@ def main():
     fig_belgium, axes_belgium = plt.subplots(num_belgium, 4, figsize=(20, 5 * num_belgium))
     for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(belgium_slices):
         # Original image
-        axes_belgium[idx, 0].imshow(image_slice, cmap='gray', aspect='auto')
+        image_lighter = np.clip(image_slice * BELGIUM_BRIGHTNESS_FACTOR, 0, 1)
+        axes_belgium[idx, 0].imshow(image_lighter, cmap='gray', aspect='auto')
         axes_belgium[idx, 0].set_title(f'Belgium Patient {idx+1} - Image')
         axes_belgium[idx, 0].axis('off')
         # Ground truth mask
@@ -267,7 +256,7 @@ def main():
         axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
         axes_belgium[idx, 2].axis('off')
         # Overlay
-        axes_belgium[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
+        axes_belgium[idx, 3].imshow(image_lighter, cmap='gray', aspect='auto')
         # Create an overlay of ground truth and predicted masks
         overlay = np.zeros((*image_slice.shape, 3))
         # Overlap (both masks) in green
@@ -276,6 +265,7 @@ def main():
         overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
+        # Display overlay with specified alpha
         axes_belgium[idx, 3].imshow(overlay, alpha=0.22, aspect='auto')
         axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
         axes_belgium[idx, 3].axis('off')

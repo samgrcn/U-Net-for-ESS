@@ -77,7 +77,7 @@ val_loader = DataLoader(
 )
 
 # MODEL
-model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
+model = UNet(n_channels=3, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 
