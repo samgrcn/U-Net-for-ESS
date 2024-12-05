@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from models.unet import UNet
 from scipy.ndimage import zoom
 from skimage.transform import resize
+from utils.utils import normalize
 
 def get_test_data_paths(test_dir, has_masks=True):
     patient_dirs = [os.path.join(test_dir, d) for d in os.listdir(test_dir) if os.path.isdir(os.path.join(test_dir, d))]
@@ -52,7 +53,7 @@ def load_nifti_image(nifti_path, target_spacing):
     voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
 
     data = data.astype(np.float32)
-    data = (data - np.min(data)) / (np.max(data) - np.min(data))
+    data = normalize(data)
 
     # Resample volume to target_spacing
     zoom_factors = (

@@ -1,6 +1,7 @@
 # datasets/dataset.py
 import os
 import torch
+from ..utils.utils import normalize
 from torch.utils.data import Dataset
 import numpy as np
 import nibabel as nib
@@ -69,8 +70,7 @@ class SliceDataset(Dataset):
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
         else:
-            data = data.astype(np.float32)
-            data = (data - np.min(data)) / (np.max(data) - np.min(data))
+            data = normalize(data)
 
         # Resample volume to target_spacing
         zoom_factors = (
