@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE = 8
-NUM_EPOCHS = 10
+NUM_EPOCHS = 20
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
@@ -86,7 +86,7 @@ optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.001
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 # Directory to save model checkpoints
-CHECKPOINT_DIR = 'outputs/checkpoints/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel/'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
@@ -132,7 +132,7 @@ def evaluate(model, loader, criterion, device):
 
             outputs = model(images)
             loss = criterion(outputs, masks)
-            val_loss += loss.item() * images.size(0)  # Multiply by batch size
+            val_loss += loss.item() * images.size(0)
 
             # Dice score
             dice = dice_coefficient(outputs, masks)

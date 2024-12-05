@@ -140,10 +140,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/checkpoint_epoch_10.pth.tar'  # Update with your checkpoint path
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet/best_model.pth.tar'  # Update with your checkpoint path
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet/' # UPDATE
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Define target_spacing and desired_size
