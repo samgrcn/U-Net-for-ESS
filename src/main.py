@@ -17,20 +17,19 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE = 8
-NUM_EPOCHS = 20
+NUM_EPOCHS = 30
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/paris_data/'  # Update this path to your patient folders
+PATIENT_DIR = '../data/paris_data/'  # Update this path
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
     image_paths = []
     mask_paths = []
     for patient_path in patient_paths:
-        # List files in patient folder
         files_in_patient = os.listdir(patient_path)
         # Identify image file
         image_file = None
@@ -52,7 +51,6 @@ def get_file_paths(patient_dir):
         mask_paths.append(mask_path)
     return image_paths, mask_paths
 
-# Get image and mask paths
 image_paths, mask_paths = get_file_paths(PATIENT_DIR)
 
 # Split data
@@ -60,11 +58,9 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
-target_spacing = (3.0, 1.7188, 1.7188)
-
 # Datasets
-train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
-val_dataset = SliceDataset(val_img_paths, val_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
+train_dataset = SliceDataset(train_img_paths, train_mask_paths)
+val_dataset = SliceDataset(val_img_paths, val_mask_paths)
 
 # Data loaders
 train_loader = DataLoader(
@@ -76,17 +72,14 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
-# MODEL
+# Use 3 channels now
 model = UNet(n_channels=3, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
-
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
-
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-# Directory to save model checkpoints
-CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Unet-3-slices'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
@@ -102,18 +95,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         images = images.to(device)
         masks = masks.to(device)
 
-        # Forward pass
         outputs = model(images)
         loss = criterion(outputs, masks)
 
-        # Backward pass and optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item() * images.size(0)  # Multiply by batch size
+        running_loss += loss.item() * images.size(0)
 
-        # Update progress bar
         loop.set_description(f"Training")
         loop.set_postfix(loss=loss.item())
 
@@ -134,11 +124,9 @@ def evaluate(model, loader, criterion, device):
             loss = criterion(outputs, masks)
             val_loss += loss.item() * images.size(0)
 
-            # Dice score
             dice = dice_coefficient(outputs, masks)
             dice_score += dice.item() * images.size(0)
 
-            # Update progress bar
             loop.set_description(f"Validation")
             loop.set_postfix(loss=loss.item(), dice=dice.item())
 
@@ -148,8 +136,6 @@ def evaluate(model, loader, criterion, device):
 
 def main():
     best_val_dice = 0.0
-
-    # Lists to store metrics
     train_losses = []
     val_losses = []
     val_dices = []
@@ -157,12 +143,10 @@ def main():
     for epoch in range(NUM_EPOCHS):
         logging.info(f"Epoch [{epoch+1}/{NUM_EPOCHS}]")
 
-        # Training
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
         logging.info(f"Training Loss: {train_loss:.4f}")
         train_losses.append(train_loss)
 
-        # Validation
         val_loss, val_dice = evaluate(model, val_loader, criterion, DEVICE)
         logging.info(f"Validation Loss: {val_loss:.4f}, Validation Dice: {val_dice:.4f}")
         val_losses.append(val_loss)
@@ -170,7 +154,6 @@ def main():
 
         scheduler.step(val_loss)
 
-        # If best model so far
         if val_dice > best_val_dice:
             best_val_dice = val_dice
             save_checkpoint({
@@ -180,7 +163,6 @@ def main():
                 'val_dice': val_dice,
             }, filename='best_model.pth.tar')
 
-        # Saves model every 10 epochs
         if (epoch + 1) % 10 == 0:
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -189,7 +171,6 @@ def main():
                 'val_dice': val_dice,
             }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
 
-    # Plots metrics
     epochs = range(1, NUM_EPOCHS + 1)
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
