@@ -1,13 +1,18 @@
 # datasets/dataset.py
 import os
 import torch
-from ..utils.utils import normalize
 from torch.utils.data import Dataset
 import numpy as np
 import nibabel as nib
 import pydicom
 from skimage.transform import resize
 from scipy.ndimage import zoom
+
+def normalize(img: np.ndarray) -> np.ndarray:
+    """Percentile-based normalization of the gray levels."""
+    img = img.astype("float32") / np.percentile(img, 99)
+    img[img > 1.0] = 0.975
+    return img
 
 class SliceDataset(Dataset):
     def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(3.0, 1.7188, 1.7188)):
