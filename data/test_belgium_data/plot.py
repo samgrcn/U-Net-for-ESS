@@ -33,5 +33,5 @@ def load_and_view_middle_slice(nifti_path):
 
 # Example usage
 # Replace 'path_to_nifti_file.nii' with the actual path to your NIfTI file
-nifti_path = '51/ mDIXON-Quant_BH_v3.nii'
+nifti_path = '52/ mDIXON-Quant_BH_v3.nii'
 load_and_view_middle_slice(nifti_path)
