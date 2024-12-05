@@ -216,6 +216,7 @@ def main():
     num_paris = len(paris_slices)
     num_belgium = len(belgium_slices)
 
+
     # Plot Paris slices
     fig_paris, axes_paris = plt.subplots(num_paris, 4, figsize=(20, 5 * num_paris))
     for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(paris_slices):
@@ -235,13 +236,13 @@ def main():
         axes_paris[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
         # Create an overlay of ground truth and predicted masks
         overlay = np.zeros((*image_slice.shape, 3))
-        # Ground truth mask in green
-        overlay[mask_slice == 1] = [0, 1, 0]
-        # Predicted mask in red
-        overlay[predicted_mask_slice == 1] = [1, 0, 0]
-        # Where both masks overlap (correct predictions), color in yellow
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [1, 1, 0]
-        axes_paris[idx, 3].imshow(overlay, alpha=0.5)
+        # Overlap (both masks) in green
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
+        # Ground truth mask only in yellow
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
+        # Predicted mask only in red
+        overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
+        axes_paris[idx, 3].imshow(overlay, alpha=0.3, aspect='auto')
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
     plt.tight_layout()
@@ -268,13 +269,13 @@ def main():
         axes_belgium[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
         # Create an overlay of ground truth and predicted masks
         overlay = np.zeros((*image_slice.shape, 3))
-        # Ground truth mask in green
-        overlay[mask_slice == 1] = [0, 1, 0]
-        # Predicted mask in red
-        overlay[predicted_mask_slice == 1] = [1, 0, 0]
-        # Where both masks overlap (correct predictions), color in yellow
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [1, 1, 0]
-        axes_belgium[idx, 3].imshow(overlay, alpha=0.5)
+        # Overlap (both masks) in green
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
+        # Ground truth mask only in yellow
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
+        # Predicted mask only in red
+        overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
+        axes_belgium[idx, 3].imshow(overlay, alpha=0.3, aspect='auto')
         axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
         axes_belgium[idx, 3].axis('off')
     plt.tight_layout()
