@@ -228,7 +228,7 @@ def main():
         axes_paris[idx, 2].set_title(f'Paris Patient {idx+1} - Predicted Mask')
         axes_paris[idx, 2].axis('off')
         # Overlay
-        axes_paris[idx, 3].imshow(image_slice, cmap='gray')
+        axes_paris[idx, 3].imshow(image_slice, aspect='auto')
         axes_paris[idx, 3].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
@@ -253,7 +253,7 @@ def main():
         axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
         axes_belgium[idx, 2].axis('off')
         # Overlay
-        axes_belgium[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
+        axes_belgium[idx, 3].imshow(image_slice, aspect='auto')
         axes_belgium[idx, 3].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
         axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
         axes_belgium[idx, 3].axis('off')
