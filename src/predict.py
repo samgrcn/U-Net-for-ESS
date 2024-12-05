@@ -242,7 +242,7 @@ def main():
         overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
-        axes_paris[idx, 3].imshow(overlay, alpha=0.3, aspect='auto')
+        axes_paris[idx, 3].imshow(overlay, alpha=0.2, aspect='auto')
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
     plt.tight_layout()
@@ -275,7 +275,7 @@ def main():
         overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [1, 1, 0]
         # Predicted mask only in red
         overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
-        axes_belgium[idx, 3].imshow(overlay, alpha=0.3, aspect='auto')
+        axes_belgium[idx, 3].imshow(overlay, alpha=0.2, aspect='auto')
         axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
         axes_belgium[idx, 3].axis('off')
     plt.tight_layout()
