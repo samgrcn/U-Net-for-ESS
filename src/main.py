@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE = 8
-NUM_EPOCHS = 10
+NUM_EPOCHS = 20
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
@@ -79,7 +79,7 @@ model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
@@ -206,6 +206,9 @@ def main():
     plt.legend()
 
     plt.tight_layout()
+    plot_path = os.path.join(CHECKPOINT_DIR, 'training_plot.png')
+    plt.savefig(plot_path)
+    logging.info(f"Training plot saved at {plot_path}")
     plt.show()
 
 if __name__ == '__main__':
