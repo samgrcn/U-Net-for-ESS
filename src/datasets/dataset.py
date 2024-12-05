@@ -75,6 +75,7 @@ class SliceDataset(Dataset):
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
         else:
+            data.astype(np.float32)
             data = normalize(data)
 
         # Resample volume to target_spacing
