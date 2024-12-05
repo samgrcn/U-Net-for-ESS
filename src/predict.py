@@ -228,8 +228,16 @@ def main():
         axes_paris[idx, 2].set_title(f'Paris Patient {idx+1} - Predicted Mask')
         axes_paris[idx, 2].axis('off')
         # Overlay
-        axes_paris[idx, 3].imshow(image_slice, aspect='auto')
-        axes_paris[idx, 3].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
+        axes_paris[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
+        # Create an overlay of ground truth and predicted masks
+        overlay = np.zeros((*image_slice.shape, 3))
+        # Ground truth mask in green
+        overlay[mask_slice == 1] = [0, 1, 0]
+        # Predicted mask in red
+        overlay[predicted_mask_slice == 1] = [1, 0, 0]
+        # Where both masks overlap (correct predictions), color in yellow
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [1, 1, 0]
+        axes_paris[idx, 3].imshow(overlay, alpha=0.5)
         axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
         axes_paris[idx, 3].axis('off')
     plt.tight_layout()
@@ -253,8 +261,16 @@ def main():
         axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
         axes_belgium[idx, 2].axis('off')
         # Overlay
-        axes_belgium[idx, 3].imshow(image_slice, aspect='auto')
-        axes_belgium[idx, 3].imshow(predicted_mask_slice, cmap='jet', alpha=0.5)
+        axes_belgium[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
+        # Create an overlay of ground truth and predicted masks
+        overlay = np.zeros((*image_slice.shape, 3))
+        # Ground truth mask in green
+        overlay[mask_slice == 1] = [0, 1, 0]
+        # Predicted mask in red
+        overlay[predicted_mask_slice == 1] = [1, 0, 0]
+        # Where both masks overlap (correct predictions), color in yellow
+        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [1, 1, 0]
+        axes_belgium[idx, 3].imshow(overlay, alpha=0.5)
         axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
         axes_belgium[idx, 3].axis('off')
     plt.tight_layout()
