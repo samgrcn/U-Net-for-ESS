@@ -208,6 +208,9 @@ def main():
     plt.legend()
 
     plt.tight_layout()
+    plot_path = os.path.join(CHECKPOINT_DIR, 'training_plot.png')
+    plt.savefig(plot_path)
+    logging.info(f"Training plot saved at {plot_path}")
     plt.show()
 
 if __name__ == '__main__':
