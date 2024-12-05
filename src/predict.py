@@ -26,7 +26,11 @@ def get_test_data_paths(test_dir, has_masks=True):
         image_path = os.path.join(patient_dir, image_file)
         image_paths.append(image_path)
         if has_masks:
-            mask_file = 'erector.nii'
+            mask_file = None
+            for fname in ['erector.nii', 'erector.nii.gz']:
+                if fname in files_in_patient:
+                    mask_file = fname
+                    break
             mask_path = os.path.join(patient_dir, mask_file)
             if not os.path.exists(mask_path):
                 print(f"No mask file found in {patient_dir}")
@@ -136,10 +140,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/best_model.pth.tar'  # Update with your checkpoint path
-    TEST_PARIS_DIR = 'data/test_paris_data/'
-    TEST_BELGIUM_DIR = 'data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/your_model_name/'  # Replace 'your_model_name' with appropriate name
+    CHECKPOINT_PATH = 'outputs/checkpoints/checkpoint_epoch_10.pth.tar'  # Update with your checkpoint path
+    TEST_PARIS_DIR = '../data/test_paris_data/'
+    TEST_BELGIUM_DIR = '../data/test_belgium_data/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Define target_spacing and desired_size
