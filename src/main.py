@@ -81,7 +81,7 @@ model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.001)
 
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
