@@ -6,6 +6,7 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 from models.unet import UNet
 from skimage.transform import resize
+from scipy.ndimage import zoom
 
 def get_test_data_paths(test_dir, has_masks=True):
     patient_dirs = [os.path.join(test_dir, d) for d in os.listdir(test_dir) if os.path.isdir(os.path.join(test_dir, d))]
@@ -42,25 +43,53 @@ def get_test_data_paths(test_dir, has_masks=True):
     else:
         return image_paths
 
-def load_nifti_image(nifti_path):
+def load_nifti_image(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
     img = nib.load(nifti_path)
     data = img.get_fdata()
     affine = img.affine
+    header = img.header
+
+    # Original voxel spacing (X, Y, Z)
+    voxel_spacing = header.get_zooms()
+    # Reorder to (Z, Y, X)
+    voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
 
     data = data.astype(np.float32)
     data = (data - np.min(data)) / (np.max(data) - np.min(data))
 
-    return data, affine
+    # Resample volume to target_spacing
+    zoom_factors = (
+        voxel_spacing[0] / target_spacing[0],
+        voxel_spacing[1] / target_spacing[1],
+        voxel_spacing[2] / target_spacing[2]
+    )
+    data_resampled = zoom(data, zoom_factors, order=1)
 
-def load_nifti_mask(nifti_path):
+    return data_resampled, affine
+
+def load_nifti_mask(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
     img = nib.load(nifti_path)
     data = img.get_fdata()
+    header = img.header
+
+    voxel_spacing = header.get_zooms()
+    voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
+
     data = data.astype(np.float32)
     data = (data > 0).astype(np.uint8)
-    return data
+
+    # For masks, use nearest-neighbor interpolation (order=0)
+    from scipy.ndimage import zoom
+    zoom_factors = (
+        voxel_spacing[0] / target_spacing[0],
+        voxel_spacing[1] / target_spacing[1],
+        voxel_spacing[2] / target_spacing[2]
+    )
+    data_resampled = zoom(data, zoom_factors, order=0)
+
+    return data_resampled
 
 def load_model(checkpoint_path, device):
-    # Now loading 3-channel model
     model = UNet(n_channels=3, n_classes=1, bilinear=True).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
@@ -80,12 +109,11 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
         slice_current = image_data[:, :, i]
         slice_next = image_data[:, :, idx_next]
 
-        # Resize each slice
         slice_prev_res = resize(slice_prev, desired_size, mode='reflect', anti_aliasing=True)
         slice_current_res = resize(slice_current, desired_size, mode='reflect', anti_aliasing=True)
         slice_next_res = resize(slice_next, desired_size, mode='reflect', anti_aliasing=True)
 
-        image_3ch = np.stack([slice_prev_res, slice_current_res, slice_next_res], axis=0)  # (3, H, W)
+        image_3ch = np.stack([slice_prev_res, slice_current_res, slice_next_res], axis=0)
 
         image_tensor = torch.from_numpy(image_3ch).unsqueeze(0).float().to(device)
 
@@ -106,32 +134,29 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
         predicted_masks[:, :, i] = predicted_mask_original_size
 
         if (i + 1) % 10 == 0 or (i + 1) == D:
-            print(f"Processed slice {i + 1}/{D}")
+            print(f"Processed slice {i+1}/{D}")
 
     return predicted_masks
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    CHECKPOINT_PATH = 'outputs/checkpoints/Unet-3-slices/best_model.pth.tar'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Unet-3ch-voxel/best_model.pth.tar'
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Unet-3-slices/'
+    OUTPUT_DIR = 'outputs/predictions/Unet-3ch-voxel/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
 
-    # Get test data paths
     paris_image_paths, paris_mask_paths = get_test_data_paths(TEST_PARIS_DIR, has_masks=True)
     belgium_image_paths, belgium_mask_paths = get_test_data_paths(TEST_BELGIUM_DIR, has_masks=True)
 
-    # Select 4 test images
     paris_image_paths = paris_image_paths[:4]
     paris_mask_paths = paris_mask_paths[:4]
     belgium_image_paths = belgium_image_paths[:4]
     belgium_mask_paths = belgium_mask_paths[:4]
 
-    # Lists for plotting
     paris_slices = []
     belgium_slices = []
 
@@ -175,7 +200,7 @@ def main():
     num_paris = len(paris_slices)
     fig_paris, axes_paris = plt.subplots(num_paris, 4, figsize=(20, 5 * num_paris))
     if num_paris == 1:
-        axes_paris = [axes_paris]  # If only one row
+        axes_paris = [axes_paris]
     for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(paris_slices):
         axes_paris[idx][0].imshow(image_slice, cmap='gray', aspect='auto')
         axes_paris[idx][0].set_title(f'Paris Patient {idx+1} - Image')
