@@ -6,14 +6,15 @@ import numpy as np
 import nibabel as nib
 import pydicom
 from skimage.transform import resize
+from scipy.ndimage import zoom
 
 class SliceDataset(Dataset):
-    def __init__(self, image_paths, mask_paths, desired_size=(256, 256)):
+    def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(3.0, 1.7188, 1.7188)):
         self.image_slices = []
         self.mask_slices = []
         self.desired_size = desired_size
+        self.target_spacing = target_spacing  # (Z, Y, X)
 
-        current_index = 0
         for img_path, mask_path in zip(image_paths, mask_paths):
             image_slices = self.load_slices(img_path, is_mask=False)
             mask_slices = self.load_slices(mask_path, is_mask=True)
@@ -78,13 +79,30 @@ class SliceDataset(Dataset):
     def load_nifti_slices(self, nifti_path, is_mask=False):
         img = nib.load(nifti_path)
         data = img.get_fdata()
+        header = img.header
+
+        # Original voxel spacing (X, Y, Z)
+        voxel_spacing = header.get_zooms()
+        # Reorder to (Z, Y, X)
+        voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
 
         if is_mask:
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
+            order = 0
         else:
             data = data.astype(np.float32)
             data = (data - np.min(data)) / (np.max(data) - np.min(data))
+            order = 1
 
-        slices = [data[:, :, i] for i in range(data.shape[2])]
+        # Resample volume to target_spacing
+        zoom_factors = (
+            voxel_spacing[0] / self.target_spacing[0],
+            voxel_spacing[1] / self.target_spacing[1],
+            voxel_spacing[2] / self.target_spacing[2]
+        )
+        data_resampled = zoom(data, zoom_factors, order=order)
+
+        # Extract slices along Z-axis
+        slices = [data_resampled[:, :, i] for i in range(data_resampled.shape[2])]
         return slices

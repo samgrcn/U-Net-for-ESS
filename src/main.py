@@ -23,7 +23,7 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/paris_data/'  # Update this path
+PATIENT_DIR = '../data/paris_data/'  # Update this path if necessary
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
@@ -41,6 +41,7 @@ def get_file_paths(patient_dir):
             print(f"No image file found in {patient_path}")
             continue
         image_path = os.path.join(patient_path, image_file)
+
         # Check if mask exists
         mask_file = 'erector.nii'
         mask_path = os.path.join(patient_path, mask_file)
@@ -58,9 +59,12 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
+# Define target spacing for voxel resampling
+target_spacing = (3.0, 1.7188, 1.7188)  # (Z, Y, X) spacing
+
 # Datasets
-train_dataset = SliceDataset(train_img_paths, train_mask_paths)
-val_dataset = SliceDataset(val_img_paths, val_mask_paths)
+train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
+val_dataset = SliceDataset(val_img_paths, val_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
 
 # Data loaders
 train_loader = DataLoader(
@@ -79,7 +83,7 @@ criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-CHECKPOINT_DIR = 'outputs/checkpoints/Unet-3-slices'
+CHECKPOINT_DIR = 'outputs/checkpoints/Unet-3ch-voxel'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
