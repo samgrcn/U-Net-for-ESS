@@ -17,13 +17,13 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BATCH_SIZE = 8
-NUM_EPOCHS = 20
+NUM_EPOCHS = 30
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/patients/'  # Update this path to your patient folders
+PATIENT_DIR = '../data/paris_data/'  # Update this path to your patient folders
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
@@ -84,7 +84,7 @@ optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 # Directory to save model checkpoints
-CHECKPOINT_DIR = 'outputs/checkpoints/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet2'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):

@@ -116,10 +116,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet/best_model.pth.tar'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet2/best_model.pth.tar'
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet2/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
