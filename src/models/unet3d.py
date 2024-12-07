@@ -30,25 +30,21 @@ class Down3D(nn.Module):
 class Up3D(nn.Module):
     def __init__(self, in_channels, out_channels, trilinear=True):
         super(Up3D, self).__init__()
-
-        # If using trilinear upsampling
         if trilinear:
             self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
         else:
             self.up = nn.ConvTranspose3d(in_channels//2, in_channels//2, kernel_size=2, stride=2)
-
         self.conv = DoubleConv3D(in_channels, out_channels)
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # Pad x1 if necessary
         diffD = x2.size()[2] - x1.size()[2]
         diffH = x2.size()[3] - x1.size()[3]
         diffW = x2.size()[4] - x1.size()[4]
 
-        x1 = F.pad(x1, [diffW // 2, diffW - diffW // 2,
-                         diffH // 2, diffH - diffH // 2,
-                         diffD // 2, diffD - diffD // 2])
+        x1 = F.pad(x1, [diffW // 2, diffW - diffW//2,
+                         diffH // 2, diffH - diffH//2,
+                         diffD // 2, diffD - diffD//2])
 
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
@@ -64,7 +60,7 @@ class OutConv3D(nn.Module):
 class UNet3D(nn.Module):
     def __init__(self, in_channels=1, out_channels=1, base_channels=64, trilinear=True):
         super(UNet3D, self).__init__()
-        # You can reduce base_channels to 32 or 16 if memory is an issue
+        # Reduce base_channels if memory is an issue
         self.inc = DoubleConv3D(in_channels, base_channels)
         self.down1 = Down3D(base_channels, base_channels*2)
         self.down2 = Down3D(base_channels*2, base_channels*4)

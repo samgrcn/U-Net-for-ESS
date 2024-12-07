@@ -15,15 +15,18 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Hyperparams
-BATCH_SIZE = 1     # Try batch_size=1 if memory is an issue
+# Hyperparameters
+BATCH_SIZE = 1  # Keep batch size low for memory reasons
 NUM_EPOCHS = 30
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
+# Target voxel spacing (from Paris dataset)
+TARGET_SPACING = (3.0, 1.7188, 1.7188)
+
 # PATHS
-PATIENT_DIR = './data/paris_data/'  # Update if needed
+PATIENT_DIR = '../data/paris_data/'
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
@@ -49,21 +52,17 @@ def get_file_paths(patient_dir):
         mask_paths.append(mask_path)
     return image_paths, mask_paths
 
-# Get image and mask paths
 image_paths, mask_paths = get_file_paths(PATIENT_DIR)
 
-# Split data
 train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_split(
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
-# Datasets
-# We will use patch-based training for 3D
-# Adjust patch_size and number of patches per volume as needed
-train_dataset = VolumeDataset(train_img_paths, train_mask_paths, patch_size=(64,64,64), num_patches_per_volume=10, augment=True)
-val_dataset = VolumeDataset(val_img_paths, val_mask_paths, patch_size=(64,64,64), num_patches_per_volume=5, augment=False)
+train_dataset = VolumeDataset(train_img_paths, train_mask_paths, patch_size=(64,64,64),
+                              num_patches_per_volume=10, augment=True, target_spacing=TARGET_SPACING)
+val_dataset = VolumeDataset(val_img_paths, val_mask_paths, patch_size=(64,64,64),
+                            num_patches_per_volume=5, augment=False, target_spacing=TARGET_SPACING)
 
-# DataLoaders
 train_loader = DataLoader(
     train_dataset, batch_size=BATCH_SIZE, shuffle=True,
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
@@ -73,14 +72,13 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
-# MODEL
 model = UNet3D(in_channels=1, out_channels=1).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-CHECKPOINT_DIR = './outputs/checkpoints/3D-Unet'
+CHECKPOINT_DIR = './outputs/checkpoints/3D-Unet-voxel-min'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
@@ -93,8 +91,8 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     running_loss = 0.0
     loop = tqdm(loader, total=len(loader))
     for images, masks in loop:
-        images = images.to(device)    # [B,1,D,H,W]
-        masks = masks.to(device)      # [B,1,D,H,W]
+        images = images.to(device)
+        masks = masks.to(device)
 
         optimizer.zero_grad()
         outputs = model(images)
@@ -103,7 +101,6 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         optimizer.step()
 
         running_loss += loss.item() * images.size(0)
-
         loop.set_description("Training")
         loop.set_postfix(loss=loss.item())
 
@@ -154,7 +151,6 @@ def main():
 
         scheduler.step(val_loss)
 
-        # Save best model
         if val_dice > best_val_dice:
             best_val_dice = val_dice
             save_checkpoint({
@@ -172,7 +168,7 @@ def main():
                 'val_dice': val_dice,
             }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
 
-    # Plot training curves
+    # Plot metrics
     epochs = range(1, NUM_EPOCHS + 1)
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
