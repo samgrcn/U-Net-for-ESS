@@ -1,11 +1,12 @@
-# predict.py
 import os
 import torch
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
-from models.unet import UNet
+from src.models.unet3d import UNet3D
 from skimage.transform import resize
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_test_data_paths(test_dir, has_masks=True):
     patient_dirs = [os.path.join(test_dir, d) for d in os.listdir(test_dir) if os.path.isdir(os.path.join(test_dir, d))]
@@ -13,7 +14,6 @@ def get_test_data_paths(test_dir, has_masks=True):
     mask_paths = []
     for patient_dir in patient_dirs:
         files_in_patient = os.listdir(patient_dir)
-        # Identify image file
         image_file = None
         for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii']:
             if fname in files_in_patient:
@@ -49,210 +49,147 @@ def load_nifti_image(nifti_path):
     affine = img.affine
 
     data = data.astype(np.float32)
-    data = (data - np.min(data)) / (np.max(data) - np.min(data))
+    data = (data - np.min(data)) / (np.max(data) - np.min(data) + 1e-8)
 
     return data, affine
 
 def load_nifti_mask(nifti_path):
     img = nib.load(nifti_path)
     data = img.get_fdata()
-
-    data = data.astype(np.float32)
-    # Binarize mask
     data = (data > 0).astype(np.uint8)
-
     return data
 
 def load_model(checkpoint_path, device):
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet3D(in_channels=1, out_channels=1).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
-    print("Model loaded successfully.")
     return model
 
-def predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5):
-    H, W, D = image_data.shape
-    predicted_masks = np.zeros((H, W, D), dtype=np.uint8)
+def predict_volume(model, volume, patch_size=(64,64,64), threshold=0.5):
+    # Sliding window inference if needed
+    D, H, W = volume.shape
+    pd, ph, pw = patch_size
+    pred = np.zeros((D,H,W), dtype=np.float32)
+    count_map = np.zeros((D,H,W), dtype=np.float32)
 
-    for i in range(D):
-        current_slice = image_data[:, :, i]
+    # Steps
+    dz = max(pd//2, 1)
+    dy = max(ph//2, 1)
+    dx = max(pw//2, 1)
 
-        # Resize slice to desired_size
-        image_resized = resize(
-            current_slice,
-            desired_size,
-            mode='reflect',
-            anti_aliasing=True
-        )
+    for d_start in range(0, D, dz):
+        for h_start in range(0, H, dy):
+            for w_start in range(0, W, dx):
+                d_end = min(d_start+pd, D)
+                h_end = min(h_start+ph, H)
+                w_end = min(w_start+pw, W)
 
-        # Add batch and channel dimensions
-        image_tensor = torch.from_numpy(image_resized).unsqueeze(0).unsqueeze(0).float().to(device)
+                patch = volume[d_start:d_end, h_start:h_end, w_start:w_end]
 
-        with torch.no_grad():
-            output = model(image_tensor)
+                # Pad if needed
+                patch_padded = np.zeros(patch_size, dtype=np.float32)
+                dd, hh, ww = patch.shape
+                patch_padded[:dd, :hh, :ww] = patch
+                patch_tensor = torch.from_numpy(patch_padded[None,None,...]).float().to(DEVICE)
 
-        probability_map = torch.sigmoid(output).cpu().numpy()[0, 0, :, :]
-        predicted_mask_resized = (probability_map > threshold).astype(np.uint8)
+                with torch.no_grad():
+                    out = model(patch_tensor)
+                prob = torch.sigmoid(out).cpu().numpy()[0,0]
 
-        # Resize mask back to original slice size
-        predicted_mask_original_size = resize(
-            predicted_mask_resized,
-            (current_slice.shape[0], current_slice.shape[1]),
-            order=0,
-            preserve_range=True,
-            anti_aliasing=False
-        ).astype(np.uint8)
+                # Unpad prob
+                prob = prob[:dd,:hh,:ww]
 
-        predicted_masks[:, :, i] = predicted_mask_original_size
+                pred[d_start:d_start+dd, h_start:h_start+hh, w_start:w_start+ww] += prob
+                count_map[d_start:d_start+dd, h_start:h_start+hh, w_start:w_start+ww] += 1
 
-        # Print progress
-        if (i + 1) % 10 == 0 or (i + 1) == D:
-            print(f"Processed slice {i + 1}/{D}")
-
-    return predicted_masks
+    pred = pred / (count_map + 1e-8)
+    pred_mask = (pred > threshold).astype(np.uint8)
+    return pred_mask
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet2/best_model.pth.tar'
-    TEST_PARIS_DIR = '../data/test_paris_data/'
-    TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet2/'
+    CHECKPOINT_PATH = './outputs/checkpoints/3D-Unet/best_model.pth.tar'
+    TEST_PARIS_DIR = './data/test_paris_data/'
+    TEST_BELGIUM_DIR = './data/test_belgium_data/'
+    OUTPUT_DIR = './outputs/predictions/3D-Unet/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    model = load_model(CHECKPOINT_PATH, device)
+    model = load_model(CHECKPOINT_PATH, DEVICE)
 
-    # Get test data paths
-    paris_image_paths, paris_mask_paths = get_test_data_paths(TEST_PARIS_DIR, has_masks=True)
-    belgium_image_paths, belgium_mask_paths = get_test_data_paths(TEST_BELGIUM_DIR, has_masks=True)
+    paris_image_paths, paris_mask_paths = get_test_data_paths(TEST_PARIS_DIR, True)
+    belgium_image_paths, belgium_mask_paths = get_test_data_paths(TEST_BELGIUM_DIR, True)
 
-    # Select the 4 test images
+    # Take first 4
     paris_image_paths = paris_image_paths[:4]
     paris_mask_paths = paris_mask_paths[:4]
     belgium_image_paths = belgium_image_paths[:4]
     belgium_mask_paths = belgium_mask_paths[:4]
 
-    # Lists to hold slices for plotting
     paris_slices = []
     belgium_slices = []
 
-    # Process Paris images
     for idx, (image_path, mask_path) in enumerate(zip(paris_image_paths, paris_mask_paths)):
-        # Load image data
         image_data, affine = load_nifti_image(image_path)
-        # Load mask data
         mask_data = load_nifti_mask(mask_path)
-        # Predict mask
-        predicted_masks = predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5)
-        # Save predicted mask as NIfTI
-        predicted_mask_nifti = nib.Nifti1Image(predicted_masks.astype(np.float32), affine)
+        pred_mask = predict_volume(model, image_data, patch_size=(64,64,64), threshold=0.5)
+
+        # Save prediction
+        pred_nifti = nib.Nifti1Image(pred_mask.astype(np.float32), affine)
         output_mask_path = os.path.join(OUTPUT_DIR, f'paris_patient_{idx+1}_pred_mask.nii.gz')
-        nib.save(predicted_mask_nifti, output_mask_path)
-        print(f"Predicted mask saved at {output_mask_path}")
+        nib.save(pred_nifti, output_mask_path)
 
-        # Get middle slice
-        middle_slice_idx = image_data.shape[2] // 2
-        image_slice = image_data[:, :, middle_slice_idx]
-        mask_slice = mask_data[:, :, middle_slice_idx]
-        predicted_mask_slice = predicted_masks[:, :, middle_slice_idx]
+        # Middle slice
+        mid = image_data.shape[2]//2
+        paris_slices.append((image_data[:,:,mid], mask_data[:,:,mid], pred_mask[:,:,mid]))
 
-        # Collect slices for plotting
-        paris_slices.append((image_slice, mask_slice, predicted_mask_slice))
-
-    # Process Belgium images
     for idx, (image_path, mask_path) in enumerate(zip(belgium_image_paths, belgium_mask_paths)):
-        # Load image data
         image_data, affine = load_nifti_image(image_path)
-        # Load mask data
         mask_data = load_nifti_mask(mask_path)
-        # Predict mask
-        predicted_masks = predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5)
-        # Save predicted mask as NIfTI
-        predicted_mask_nifti = nib.Nifti1Image(predicted_masks.astype(np.float32), affine)
+        pred_mask = predict_volume(model, image_data, patch_size=(64,64,64), threshold=0.5)
+
+        pred_nifti = nib.Nifti1Image(pred_mask.astype(np.float32), affine)
         output_mask_path = os.path.join(OUTPUT_DIR, f'belgium_patient_{idx+1}_pred_mask.nii.gz')
-        nib.save(predicted_mask_nifti, output_mask_path)
-        print(f"Predicted mask saved at {output_mask_path}")
+        nib.save(pred_nifti, output_mask_path)
 
-        # Get middle slice
-        middle_slice_idx = image_data.shape[2] // 2
-        image_slice = image_data[:, :, middle_slice_idx]
-        mask_slice = mask_data[:, :, middle_slice_idx]
-        predicted_mask_slice = predicted_masks[:, :, middle_slice_idx]
+        # Middle slice
+        mid = image_data.shape[2]//2
+        belgium_slices.append((image_data[:,:,mid], mask_data[:,:,mid], pred_mask[:,:,mid]))
 
-        # Collect slices for plotting
-        belgium_slices.append((image_slice, mask_slice, predicted_mask_slice))
+    # Plot results
+    def plot_slices(slices, title_prefix, output_name):
+        num = len(slices)
+        fig, axes = plt.subplots(num, 4, figsize=(20, 5*num))
+        if num == 1:
+            axes = [axes]  # handle the single-row case
+        for i, (img_slice, gt_slice, pred_slice) in enumerate(slices):
+            axes[i][0].imshow(img_slice, cmap='gray')
+            axes[i][0].set_title(f'{title_prefix} Patient {i+1} - Image')
+            axes[i][0].axis('off')
 
-    # Now create plots
-    num_paris = len(paris_slices)
-    num_belgium = len(belgium_slices)
+            axes[i][1].imshow(gt_slice, cmap='gray')
+            axes[i][1].set_title('Ground Truth')
+            axes[i][1].axis('off')
 
-    # Plot Paris slices
-    fig_paris, axes_paris = plt.subplots(num_paris, 4, figsize=(20, 5 * num_paris))
-    for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(paris_slices):
-        # Original image
-        axes_paris[idx, 0].imshow(image_slice, cmap='gray', aspect='auto')
-        axes_paris[idx, 0].set_title(f'Paris Patient {idx+1} - Image')
-        axes_paris[idx, 0].axis('off')
-        # Ground truth mask
-        axes_paris[idx, 1].imshow(mask_slice, cmap='gray', aspect='auto')
-        axes_paris[idx, 1].set_title(f'Paris Patient {idx+1} - Ground Truth Mask')
-        axes_paris[idx, 1].axis('off')
-        # Predicted mask
-        axes_paris[idx, 2].imshow(predicted_mask_slice, cmap='gray', aspect='auto')
-        axes_paris[idx, 2].set_title(f'Paris Patient {idx+1} - Predicted Mask')
-        axes_paris[idx, 2].axis('off')
-        # Overlay
-        axes_paris[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
-        # Create an overlay of ground truth and predicted masks
-        overlay = np.zeros((*image_slice.shape, 3))
-        # Overlap (both masks) in green
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
-        # Ground truth mask only in blue
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
-        # Predicted mask only in red
-        overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
-        axes_paris[idx, 3].imshow(overlay, alpha=0.2, aspect='auto')
-        axes_paris[idx, 3].set_title(f'Paris Patient {idx+1} - Overlay')
-        axes_paris[idx, 3].axis('off')
-    plt.tight_layout()
-    plot_paris_path = os.path.join(OUTPUT_DIR, 'paris_predictions.png')
-    plt.savefig(plot_paris_path)
-    print(f"Paris predictions plot saved at {plot_paris_path}")
+            axes[i][2].imshow(pred_slice, cmap='gray')
+            axes[i][2].set_title('Predicted')
+            axes[i][2].axis('off')
 
-    # Plot Belgium slices
-    fig_belgium, axes_belgium = plt.subplots(num_belgium, 4, figsize=(20, 5 * num_belgium))
-    for idx, (image_slice, mask_slice, predicted_mask_slice) in enumerate(belgium_slices):
-        # Original image
-        axes_belgium[idx, 0].imshow(image_slice, cmap='gray', aspect='auto')
-        axes_belgium[idx, 0].set_title(f'Belgium Patient {idx+1} - Image')
-        axes_belgium[idx, 0].axis('off')
-        # Ground truth mask
-        axes_belgium[idx, 1].imshow(mask_slice, cmap='gray', aspect='auto')
-        axes_belgium[idx, 1].set_title(f'Belgium Patient {idx+1} - Ground Truth Mask')
-        axes_belgium[idx, 1].axis('off')
-        # Predicted mask
-        axes_belgium[idx, 2].imshow(predicted_mask_slice, cmap='gray', aspect='auto')
-        axes_belgium[idx, 2].set_title(f'Belgium Patient {idx+1} - Predicted Mask')
-        axes_belgium[idx, 2].axis('off')
-        # Overlay
-        axes_belgium[idx, 3].imshow(image_slice, cmap='gray', aspect='auto')
-        # Create an overlay of ground truth and predicted masks
-        overlay = np.zeros((*image_slice.shape, 3))
-        # Overlap (both masks) in green
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 1)] = [0, 1, 0]
-        # Ground truth mask only in blue
-        overlay[(mask_slice == 1) & (predicted_mask_slice == 0)] = [0, 0, 1]
-        # Predicted mask only in red
-        overlay[(mask_slice == 0) & (predicted_mask_slice == 1)] = [1, 0, 0]
-        axes_belgium[idx, 3].imshow(overlay, alpha=0.2, aspect='auto')
-        axes_belgium[idx, 3].set_title(f'Belgium Patient {idx+1} - Overlay')
-        axes_belgium[idx, 3].axis('off')
-    plt.tight_layout()
-    plot_belgium_path = os.path.join(OUTPUT_DIR, 'belgium_predictions.png')
-    plt.savefig(plot_belgium_path)
-    print(f"Belgium predictions plot saved at {plot_belgium_path}")
+            overlay = np.zeros((*img_slice.shape,3))
+            overlay[(gt_slice==1)&(pred_slice==1)] = [0,1,0]
+            overlay[(gt_slice==1)&(pred_slice==0)] = [0,0,1]
+            overlay[(gt_slice==0)&(pred_slice==1)] = [1,0,0]
+
+            axes[i][3].imshow(img_slice, cmap='gray')
+            axes[i][3].imshow(overlay, alpha=0.3)
+            axes[i][3].set_title('Overlay')
+            axes[i][3].axis('off')
+        plt.tight_layout()
+        path = os.path.join(OUTPUT_DIR, output_name)
+        plt.savefig(path)
+        plt.close(fig)
+
+    plot_slices(paris_slices, 'Paris', 'paris_predictions.png')
+    plot_slices(belgium_slices, 'Belgium', 'belgium_predictions.png')
 
 if __name__ == '__main__':
     main()
