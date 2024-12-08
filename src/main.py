@@ -23,7 +23,7 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/paris_data/'  # Update this path if necessary
+PATIENT_DIR = '../data/cropped_paris_data/'  # Update this path if necessary
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
@@ -83,7 +83,7 @@ criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-CHECKPOINT_DIR = 'outputs/checkpoints/Unet-3ch-voxel'
+CHECKPOINT_DIR = 'outputs/checkpoints/Unet-3ch-voxel-box'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
