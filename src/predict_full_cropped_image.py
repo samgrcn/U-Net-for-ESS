@@ -4,12 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Directories
-BASE_DIR = 'U-Net-for-ESS/data/'
+BASE_DIR = '../data/'
 TEST_BULK_DIR = os.path.join(BASE_DIR, 'test_belgium_bulk')
-CROPPED_TEST_BELGIUM_DIR = os.path.join(BASE_DIR, 'cropped_test_belgium_data')
+CROPPED_TEST_BELGIUM_DIR = os.path.join(BASE_DIR, 'cropped_test_belgium_bulk')
 
 # Predictions directory from the model trained on cropped data
-PRED_DIR = 'U-Net-for-ESS/outputs/predictions/Unet-3ch-voxel-FR/bulk'
+PRED_DIR = 'outputs/predictions/Unet-3ch-voxel-box/bulk'
 
 def get_bulk_image_paths(test_dir):
     """

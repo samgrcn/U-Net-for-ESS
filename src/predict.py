@@ -141,10 +141,10 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    CHECKPOINT_PATH = 'outputs/checkpoints/Unet-3ch-voxel/best_model.pth.tar'
-    TEST_PARIS_DIR = '../data/test_paris_data/'
-    TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Unet-3ch-voxel/'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Unet-3ch-voxel-box/best_model.pth.tar'
+    TEST_PARIS_DIR = '../data/cropped_test_paris_data/'
+    TEST_BELGIUM_DIR = '../data/cropped_test_belgium_data/'
+    OUTPUT_DIR = 'outputs/predictions/Unet-3ch-voxel-box/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
