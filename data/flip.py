@@ -1,6 +1,8 @@
 import os
 import nibabel as nib
 import numpy as np
+from jupyter_server.transutils import base_dir
+
 
 def flip_nifti_image(input_path):
     """
@@ -33,20 +35,20 @@ def flip_nifti_image(input_path):
 
 def main():
     # Define the base directory (current directory)
-    base_dir = os.getcwd()
+    dir = 'full_paris_data'
+    base_dir = os.path.join(dir)
 
     # List of subfolders to process
-    subfolders = ['51', '52', '53', '54']
 
-    for subfolder in subfolders:
+    for subfolder in os.listdir(base_dir):
         folder_path = os.path.join(base_dir, subfolder)
         if not os.path.isdir(folder_path):
             print(f"Folder {folder_path} does not exist. Skipping.")
             continue
 
         # Define file paths
-        image_filename = " mDIXON-Quant_BH_v3.nii"
-        mask_filename = "erector.nii.gz"
+        image_filename = " mDIXON-Quant_BH.nii.gz"
+        mask_filename = "erector.nii"
 
         image_path = os.path.join(folder_path, image_filename)
         mask_path = os.path.join(folder_path, mask_filename)
