@@ -1,4 +1,3 @@
-# predict_bulk_single_channel.py
 import os
 import torch
 import numpy as np
@@ -8,28 +7,39 @@ from skimage.transform import resize
 from scipy.ndimage import zoom
 import matplotlib.pyplot as plt
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def get_bulk_image_paths(test_dir):
     """
-    Scan through 'test_belgium_bulk/' directory.
-    For each patient directory, find a NIfTI image containing 'water' in its filename.
-    Returns: A list of tuples (patient_name, image_path)
+    For each patient directory in test_belgium_bulk/, find:
+    - A file containing "water" in its name -> water image
+    - A file containing "fatfrac" in its name -> fat fraction image
+
+    Returns: A list of tuples (patient_name, water_path, fatfrac_path)
     """
     patient_dirs = [os.path.join(test_dir, d) for d in os.listdir(test_dir)
                     if os.path.isdir(os.path.join(test_dir, d))]
     image_paths = []
     for p_dir in patient_dirs:
         files_in_patient = os.listdir(p_dir)
-        water_image = None
+
+        # Initialize variables
+        water_path = None
+        fat_path = None
+
+        # Search for water and fatfrac files
         for f in files_in_patient:
-            if 'water' in f and (f.endswith('.nii') or f.endswith('.nii.gz')):
-                water_image = f
-                break
-        if water_image is None:
-            print(f"No 'water' image found in {p_dir}. Skipping this patient.")
+            if 'water' in f and f.endswith('.nii.gz'):
+                water_path = os.path.join(p_dir, f)
+            if 'fatfrac' in f and f.endswith('.nii.gz'):
+                fat_path = os.path.join(p_dir, f)
+
+        if water_path is None or fat_path is None:
+            print(f"Missing water or fatfrac image in {p_dir}. Skipping this patient.")
             continue
-        image_path = os.path.join(p_dir, water_image)
+
         patient_name = os.path.basename(p_dir)
-        image_paths.append((patient_name, image_path))
+        image_paths.append((patient_name, water_path, fat_path))
     return image_paths
 
 def load_nifti_image(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
@@ -38,16 +48,13 @@ def load_nifti_image(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
     affine = img.affine
     header = img.header
 
-    # Original voxel spacing (X, Y, Z)
-    voxel_spacing = header.get_zooms()
-    # Reorder to (Z, Y, X)
+    voxel_spacing = header.get_zooms()  # (X, Y, Z)
     voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
 
     data = data.astype(np.float32)
-    # Normalize to [0, 1]
-    data = (data - np.min(data)) / (np.max(data) - np.min(data))
+    # Normalize
+    data = (data - np.min(data)) / (np.ptp(data))
 
-    # Resample volume to target_spacing
     zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
@@ -58,32 +65,26 @@ def load_nifti_image(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
     return data_resampled, affine
 
 def load_model(checkpoint_path, device):
-    # Loading a 1-channel model
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet(n_channels=2, n_classes=1, bilinear=True).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
     print("Model loaded successfully.")
     return model
 
-def predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5):
-    H, W, D = image_data.shape
+def predict_volume(model, water_data, fat_data, device, desired_size=(256, 256), threshold=0.5):
+    H, W, D = water_data.shape
     predicted_masks = np.zeros((H, W, D), dtype=np.uint8)
 
     for i in range(D):
-        current_slice = image_data[:, :, i]
+        water_slice = water_data[:, :, i]
+        fat_slice = fat_data[:, :, i]
 
-        # Resize the current slice to desired_size
-        image_resized = resize(
-            current_slice,
-            desired_size,
-            mode='reflect',
-            anti_aliasing=True
-        )
+        water_resized = resize(water_slice, desired_size, mode='reflect', anti_aliasing=True)
+        fat_resized = resize(fat_slice, desired_size, mode='reflect', anti_aliasing=True)
 
-        # Add batch and channel dimensions for single-channel input
-        # shape: [1, 1, H, W]
-        image_tensor = torch.from_numpy(image_resized).unsqueeze(0).unsqueeze(0).float().to(device)
+        image_tensor = np.stack([water_resized, fat_resized], axis=0)  # (2, H, W)
+        image_tensor = torch.from_numpy(image_tensor).unsqueeze(0).float().to(device)  # (1,2,H,W)
 
         with torch.no_grad():
             output = model(image_tensor)
@@ -91,7 +92,6 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
         probability_map = torch.sigmoid(output).cpu().numpy()[0, 0, :, :]
         predicted_mask_resized = (probability_map > threshold).astype(np.uint8)
 
-        # Resize mask back to original slice size
         predicted_mask_original_size = resize(
             predicted_mask_resized,
             (H, W),
@@ -108,79 +108,71 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
     return predicted_masks
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Update these paths accordingly:
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full/checkpoint_epoch_10.pth.tar'
+    # Update these paths as necessary
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-fat/checkpoint_epoch_30.pth.tar'
     TEST_BULK_DIR = '../data/test_belgium_bulk/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full/bulk/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-fat/bulk/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
 
     bulk_images = get_bulk_image_paths(TEST_BULK_DIR)
     if not bulk_images:
-        print("No 'water' images found in the bulk directory.")
+        print("No valid patients found in the bulk directory.")
         return
 
-    # Lists to store data for plotting after predictions
-    # Assuming we have exactly 15 patients
     images_list = []
     preds_list = []
     names_list = []
 
-    for patient_name, image_path in bulk_images:
-        print(f"Predicting for patient: {patient_name}, image: {image_path}")
-        image_data, affine = load_nifti_image(image_path)
+    for patient_name, water_path, fat_path in bulk_images:
+        print(f"Predicting for patient: {patient_name}")
+        water_data, affine = load_nifti_image(water_path)
+        fat_data, _ = load_nifti_image(fat_path)
 
-        # Perform prediction
-        predicted_masks = predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5)
+        predicted_masks = predict_volume(model, water_data, fat_data, device, desired_size=(256, 256), threshold=0.5)
 
-        # Save predicted mask as NIfTI
         output_mask_path = os.path.join(OUTPUT_DIR, f'{patient_name}_pred_mask.nii.gz')
-        predicted_mask_nifti = nib.Nifti1Image(predicted_masks.astype(np.float32), affine)
-        nib.save(predicted_mask_nifti, output_mask_path)
+        nib.save(nib.Nifti1Image(predicted_masks.astype(np.float32), affine), output_mask_path)
         print(f"Predicted mask saved at {output_mask_path}")
 
-        # Store for plotting
-        images_list.append(image_data)
+        images_list.append(water_data)  # use water channel for visualization
         preds_list.append(predicted_masks)
         names_list.append(patient_name)
 
-    # Now plot all 15 patients in one figure
+    # Plot all patients in one figure (up to 15 if you have 15 patients)
     num_patients = len(images_list)
-    if num_patients < 15:
-        print(f"Warning: Expected 15 patients, but got {num_patients}. We'll only plot what we have.")
-
     rows = 3
     cols = 5
     fig, axes = plt.subplots(rows, cols, figsize=(20, 12))
     axes = axes.ravel()
 
     for i in range(num_patients):
+        if i >= rows * cols:
+            break
         image_data = images_list[i]
         predicted_masks = preds_list[i]
         patient_name = names_list[i]
 
-        # Middle slice index
         slice_idx = image_data.shape[2] // 2
         img_slice = image_data[:, :, slice_idx]
         pred_slice = predicted_masks[:, :, slice_idx]
 
-        # Overlay the prediction on the image
         axes[i].imshow(img_slice, cmap='gray', aspect='auto')
         overlay = np.zeros((*img_slice.shape, 3))
-        # Show predicted mask in red
-        overlay[pred_slice == 1] = [1, 0, 0]
+        overlay[pred_slice == 1] = [1, 0, 0]  # Red for predicted mask
         axes[i].imshow(overlay, alpha=0.3, aspect='auto')
         axes[i].set_title(f'{patient_name}')
         axes[i].axis('off')
 
+    # Hide unused subplots if fewer than 15 patients
+    for j in range(i+1, rows*cols):
+        axes[j].axis('off')
+
     plt.tight_layout()
-    # Save figure of all predictions
-    bulk_plot_path = os.path.join(OUTPUT_DIR, 'all_15_patients_overlay.png')
+    bulk_plot_path = os.path.join(OUTPUT_DIR, 'all_patients_overlay.png')
     plt.savefig(bulk_plot_path)
-    print(f"All 15 patients overlay plot saved at {bulk_plot_path}")
+    print(f"All patients overlay plot saved at {bulk_plot_path}")
 
     plt.show()
 

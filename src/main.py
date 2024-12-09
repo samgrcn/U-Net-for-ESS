@@ -25,46 +25,65 @@ PIN_MEMORY = True
 # PATHS
 PATIENT_DIR = '../data/full_paris_data/'  # Update this path to your patient folders
 
+
 def get_file_paths(patient_dir):
-    patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if os.path.isdir(os.path.join(patient_dir, d))]
-    image_paths = []
+    # This function will now return three lists: water_image_paths, fat_image_paths, mask_paths
+    patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if
+                     os.path.isdir(os.path.join(patient_dir, d))]
+    water_image_paths = []
+    fat_image_paths = []
     mask_paths = []
+
     for patient_path in patient_paths:
-        # List files in patient folder
         files_in_patient = os.listdir(patient_path)
-        # Identify image file
-        image_file = None
-        for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii', ' mDIXON-Quant_BH.nii.gz']:
-            if fname in files_in_patient:
-                image_file = fname
-                break
-        if image_file is None:
-            print(f"No image file found in {patient_path}")
+
+        # Identify the water image
+        # The water image is named ' mDIXON-Quant_BH.nii.gz' (with leading space)
+        water_image_file = ' mDIXON-Quant_BH.nii.gz'
+        if water_image_file not in files_in_patient:
+            # If not found, try the old name if you have any fallback (optional)
+            # For now, just skip if not found.
+            print(f"No water image found in {patient_path}")
             continue
-        image_path = os.path.join(patient_path, image_file)
-        # Check if mask exists
+
+        # Identify the fat image
+        # The fat image is named 'fat.nii.gz'
+        fat_image_file = 'fat.nii.gz'
+        if fat_image_file not in files_in_patient:
+            print(f"No fat image found in {patient_path}")
+            continue
+
         mask_file = 'erector.nii'
-        mask_path = os.path.join(patient_path, mask_file)
-        if not os.path.exists(mask_path):
+        if mask_file not in files_in_patient:
             print(f"No mask file found in {patient_path}")
             continue
-        image_paths.append(image_path)
+
+        # If all files are found
+        water_path = os.path.join(patient_path, water_image_file)
+        fat_path = os.path.join(patient_path, fat_image_file)
+        mask_path = os.path.join(patient_path, mask_file)
+
+        water_image_paths.append(water_path)
+        fat_image_paths.append(fat_path)
         mask_paths.append(mask_path)
-    return image_paths, mask_paths
+
+    return water_image_paths, fat_image_paths, mask_paths
+
 
 # Get image and mask paths
-image_paths, mask_paths = get_file_paths(PATIENT_DIR)
+water_image_paths, fat_image_paths, mask_paths = get_file_paths(PATIENT_DIR)
 
 # Split data
-train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_split(
-    image_paths, mask_paths, test_size=0.2, random_state=42
+train_water, val_water, train_fat, val_fat, train_masks, val_masks = train_test_split(
+    water_image_paths, fat_image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
 target_spacing = (3.0, 1.7188, 1.7188)
 
 # Datasets
-train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
-val_dataset = SliceDataset(val_img_paths, val_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
+train_dataset = SliceDataset(train_water, train_fat, train_masks, desired_size=(256, 256),
+                             target_spacing=target_spacing)
+val_dataset = SliceDataset(val_water, val_fat, val_masks, desired_size=(256, 256), target_spacing=target_spacing)
 
 # Data loaders
 train_loader = DataLoader(
@@ -76,8 +95,8 @@ val_loader = DataLoader(
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 
-# MODEL
-model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
+# MODEL with 2 channels now
+model = UNet(n_channels=2, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 
@@ -86,21 +105,23 @@ optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 # Directory to save model checkpoints
-CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel-full/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel-full-fat/'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
     filepath = os.path.join(CHECKPOINT_DIR, filename)
     torch.save(state, filepath)
     logging.info(f"Model checkpoint saved at {filepath}")
 
+
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     loop = tqdm(loader, total=len(loader))
     for images, masks in loop:
-        images = images.to(device)
-        masks = masks.to(device)
+        images = images.to(device)  # images shape: [B, 2, H, W]
+        masks = masks.to(device)  # masks shape: [B, 1, H, W]
 
         # Forward pass
         outputs = model(images)
@@ -111,14 +132,14 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item() * images.size(0)  # Multiply by batch size
+        running_loss += loss.item() * images.size(0)
 
-        # Update progress bar
         loop.set_description(f"Training")
         loop.set_postfix(loss=loss.item())
 
     epoch_loss = running_loss / len(loader.dataset)
     return epoch_loss
+
 
 def evaluate(model, loader, criterion, device):
     model.eval()
@@ -138,7 +159,6 @@ def evaluate(model, loader, criterion, device):
             dice = dice_coefficient(outputs, masks)
             dice_score += dice.item() * images.size(0)
 
-            # Update progress bar
             loop.set_description(f"Validation")
             loop.set_postfix(loss=loss.item(), dice=dice.item())
 
@@ -146,16 +166,16 @@ def evaluate(model, loader, criterion, device):
     avg_dice = dice_score / len(loader.dataset)
     return avg_loss, avg_dice
 
+
 def main():
     best_val_dice = 0.0
 
-    # Lists to store metrics
     train_losses = []
     val_losses = []
     val_dices = []
 
     for epoch in range(NUM_EPOCHS):
-        logging.info(f"Epoch [{epoch+1}/{NUM_EPOCHS}]")
+        logging.info(f"Epoch [{epoch + 1}/{NUM_EPOCHS}]")
 
         # Training
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
@@ -187,9 +207,9 @@ def main():
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'val_dice': val_dice,
-            }, filename=f'checkpoint_epoch_{epoch+1}.pth.tar')
+            }, filename=f'checkpoint_epoch_{epoch + 1}.pth.tar')
 
-    # Plots metrics
+    # Plot metrics
     epochs = range(1, NUM_EPOCHS + 1)
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -212,6 +232,7 @@ def main():
     plt.savefig(plot_path)
     logging.info(f"Training plot saved at {plot_path}")
     plt.show()
+
 
 if __name__ == '__main__':
     main()
