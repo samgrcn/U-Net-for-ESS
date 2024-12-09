@@ -16,9 +16,9 @@ class SliceDataset(Dataset):
         self.target_spacing = target_spacing  # (Z, Y, X)
 
         for img_path, mask_path in zip(image_paths, mask_paths):
-            image_slices = self.load_slices(img_path, is_mask=False)
-            mask_slices = self.load_slices(mask_path, is_mask=True)
-            assert len(image_slices) == len(mask_slices), f"Mismatch in slices at {img_path}"
+            image_slices = self.load_nifti_slices(img_path, is_mask=False)
+            mask_slices = self.load_nifti_slices(mask_path, is_mask=True)
+            assert len(image_slices) == len(mask_slices), f"Mismatch in number of slices between image and mask at {img_path}"
 
             self.image_slices.extend(image_slices)
             self.mask_slices.extend(mask_slices)
@@ -27,73 +27,50 @@ class SliceDataset(Dataset):
         return len(self.image_slices)
 
     def __getitem__(self, idx):
-        # Determine neighboring slice indices
-        idx_prev = max(idx - 1, 0)
-        idx_next = min(idx + 1, len(self.image_slices) - 1)
-
-        # Get slices
-        image_prev = self.image_slices[idx_prev]
-        image_current = self.image_slices[idx]
-        image_next = self.image_slices[idx_next]
-
-        # Resize each slice before stacking
-        image_prev = resize(image_prev, self.desired_size, mode='reflect', anti_aliasing=True)
-        image_current = resize(image_current, self.desired_size, mode='reflect', anti_aliasing=True)
-        image_next = resize(image_next, self.desired_size, mode='reflect', anti_aliasing=True)
-
-        # Stack to create 3-channel image
-        image_3ch = np.stack([image_prev, image_current, image_next], axis=0)  # (3, H, W)
-
-        # Get and resize mask
+        image = self.image_slices[idx]
         mask = self.mask_slices[idx]
-        mask = resize(mask, self.desired_size, order=0, preserve_range=True, anti_aliasing=False)
+
+        # Resize image and mask to desired_size
+        image = resize(
+            image,
+            self.desired_size,
+            mode='reflect',
+            anti_aliasing=True
+        )
+        mask = resize(
+            mask,
+            self.desired_size,
+            order=0,
+            preserve_range=True,
+            anti_aliasing=False
+        )
+
+        # Add channel dimension
+        image = np.expand_dims(image, axis=0)
+        mask = np.expand_dims(mask, axis=0)
 
         # Convert to tensors
-        image_tensor = torch.from_numpy(image_3ch).float()
-        mask_tensor = torch.from_numpy(mask).float().unsqueeze(0)
+        image = torch.from_numpy(image).float()
+        mask = torch.from_numpy(mask).float()
 
-        return image_tensor, mask_tensor
-
-    def load_slices(self, path, is_mask=False):
-        if os.path.isdir(path):
-            # DICOM data
-            slices = self.load_dicom_slices(path)
-        elif path.endswith('.nii') or path.endswith('.nii.gz'):
-            # NIfTI data
-            slices = self.load_nifti_slices(path, is_mask=is_mask)
-        else:
-            raise ValueError(f"Unsupported file format: {path}")
-        return slices
-
-    def load_dicom_slices(self, dicom_dir):
-        dicom_files = [os.path.join(dicom_dir, f) for f in os.listdir(dicom_dir) if f.endswith('.dcm')]
-        dicom_files.sort(key=lambda x: int(pydicom.dcmread(x).InstanceNumber))
-        slices = []
-        for file in dicom_files:
-            ds = pydicom.dcmread(file)
-            image = ds.pixel_array.astype(np.float32)
-            image = (image - np.min(image)) / (np.max(image) - np.min(image))
-            slices.append(image)
-        return slices
+        return image, mask
 
     def load_nifti_slices(self, nifti_path, is_mask=False):
         img = nib.load(nifti_path)
         data = img.get_fdata()
         header = img.header
+        affine = img.affine
 
-        # Original voxel spacing (X, Y, Z)
-        voxel_spacing = header.get_zooms()
-        # Reorder to (Z, Y, X)
-        voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
+        # Get voxel spacing
+        voxel_spacing = header.get_zooms()  # (X, Y, Z)
+        voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
 
         if is_mask:
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
-            order = 0
         else:
             data = data.astype(np.float32)
             data = (data - np.min(data)) / (np.max(data) - np.min(data))
-            order = 1
 
         # Resample volume to target_spacing
         zoom_factors = (
@@ -101,7 +78,7 @@ class SliceDataset(Dataset):
             voxel_spacing[1] / self.target_spacing[1],
             voxel_spacing[2] / self.target_spacing[2]
         )
-        data_resampled = zoom(data, zoom_factors, order=order)
+        data_resampled = zoom(data, zoom_factors, order=1 if not is_mask else 0)
 
         # Extract slices along Z-axis
         slices = [data_resampled[:, :, i] for i in range(data_resampled.shape[2])]

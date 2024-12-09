@@ -111,9 +111,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Update these paths accordingly:
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet3-voxel/best_model.pth.tar'
-    TEST_BULK_DIR = '../data/cropped_test_belgium_bulk/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet3-voxel/bulk/'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full/checkpoint_epoch_10.pth.tar'
+    TEST_BULK_DIR = '../data/test_belgium_bulk/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full/bulk/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
