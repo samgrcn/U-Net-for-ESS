@@ -60,7 +60,7 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
-target_spacing = (3.0, 1.7188, 1.7188)
+target_spacing = (1.7188, 1.7188, 3.0)
 
 # Datasets
 train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
@@ -86,7 +86,7 @@ optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 # Directory to save model checkpoints
-CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel-full/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel-full-975/'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):

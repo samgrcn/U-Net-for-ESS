@@ -1,19 +1,18 @@
-# datasets/dataset.py
 import os
 import torch
 from torch.utils.data import Dataset
 import numpy as np
 import nibabel as nib
-import pydicom
 from skimage.transform import resize
 from scipy.ndimage import zoom
 
 class SliceDataset(Dataset):
-    def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(3.0, 1.7188, 1.7188)):
+    # target_spacing now in (X, Y, Z)
+    def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(1.7188, 1.7188, 3.0)):
         self.image_slices = []
         self.mask_slices = []
         self.desired_size = desired_size
-        self.target_spacing = target_spacing  # (Z, Y, X)
+        self.target_spacing = target_spacing
 
         for img_path, mask_path in zip(image_paths, mask_paths):
             image_slices = self.load_nifti_slices(img_path, is_mask=False)
@@ -59,25 +58,26 @@ class SliceDataset(Dataset):
         img = nib.load(nifti_path)
         data = img.get_fdata()
         header = img.header
-        affine = img.affine
-
-        # Get voxel spacing
-        voxel_spacing = header.get_zooms()  # (X, Y, Z)
-        voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
+        # Data shape: (X, Y, Z)
+        voxel_spacing = header.get_zooms()  # (X_spacing, Y_spacing, Z_spacing)
 
         if is_mask:
             data = data.astype(np.float32)
             data = (data > 0).astype(np.float32)
         else:
             data = data.astype(np.float32)
-            data = (data - np.min(data)) / (np.max(data) - np.min(data))
+            p975 = np.percentile(data, 97.5)
+            data = np.clip(data, 0, p975)
+            data = data / p975
 
-        # Resample volume to target_spacing
+        # Compute zoom factors based on (X, Y, Z) order
         zoom_factors = (
-            voxel_spacing[0] / self.target_spacing[0],
-            voxel_spacing[1] / self.target_spacing[1],
-            voxel_spacing[2] / self.target_spacing[2]
+            voxel_spacing[0] / self.target_spacing[0],  # X
+            voxel_spacing[1] / self.target_spacing[1],  # Y
+            voxel_spacing[2] / self.target_spacing[2]   # Z
         )
+
+        # Resample volume
         data_resampled = zoom(data, zoom_factors, order=1 if not is_mask else 0)
 
         # Extract slices along Z-axis
