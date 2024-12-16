@@ -1,4 +1,3 @@
-# predict_bulk_single_channel.py
 import os
 import torch
 import numpy as np
@@ -32,28 +31,29 @@ def get_bulk_image_paths(test_dir):
         image_paths.append((patient_name, image_path))
     return image_paths
 
-def load_nifti_image(nifti_path, target_spacing=(3.0, 1.7188, 1.7188)):
+# Given (3.0, 1.7188, 1.7188) in Z,X,Y, convert to X,Y,Z = (1.7188, 1.7188, 3.0)
+def load_nifti_image(nifti_path, target_spacing=(1.7188, 1.7188, 3.0)):
     img = nib.load(nifti_path)
     data = img.get_fdata()
     affine = img.affine
     header = img.header
 
-    # Original voxel spacing (X, Y, Z)
-    voxel_spacing = header.get_zooms()
-    # Reorder to (Z, Y, X)
-    voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])
+    # voxel_spacing = (X_spacing, Y_spacing, Z_spacing)
+    voxel_spacing = header.get_zooms()  # no reordering
 
     data = data.astype(np.float32)
     # Normalize to [0, 1]
-    data = (data - np.min(data)) / (np.max(data) - np.min(data))
+    p975 = np.percentile(data, 97.5)
+    data = np.clip(data, 0, p975)
+    data = data / p975
 
-    # Resample volume to target_spacing
+    # Resample volume to target_spacing (X, Y, Z)
     zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
         voxel_spacing[2] / target_spacing[2]
     )
-    data_resampled = zoom(data, zoom_factors, order=1)
+    data_resampled = zoom(data, zoom_factors, order=0)
 
     return data_resampled, affine
 
@@ -82,7 +82,6 @@ def predict_volume(model, image_data, device, desired_size=(256, 256), threshold
         )
 
         # Add batch and channel dimensions for single-channel input
-        # shape: [1, 1, H, W]
         image_tensor = torch.from_numpy(image_resized).unsqueeze(0).unsqueeze(0).float().to(device)
 
         with torch.no_grad():
@@ -111,9 +110,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Update these paths accordingly:
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full/checkpoint_epoch_10.pth.tar'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-975/checkpoint_epoch_10.pth.tar'
     TEST_BULK_DIR = '../data/test_belgium_bulk/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full/bulk/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-975/bulk/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
@@ -123,8 +122,6 @@ def main():
         print("No 'water' images found in the bulk directory.")
         return
 
-    # Lists to store data for plotting after predictions
-    # Assuming we have exactly 15 patients
     images_list = []
     preds_list = []
     names_list = []
@@ -142,12 +139,10 @@ def main():
         nib.save(predicted_mask_nifti, output_mask_path)
         print(f"Predicted mask saved at {output_mask_path}")
 
-        # Store for plotting
         images_list.append(image_data)
         preds_list.append(predicted_masks)
         names_list.append(patient_name)
 
-    # Now plot all 15 patients in one figure
     num_patients = len(images_list)
     if num_patients < 15:
         print(f"Warning: Expected 15 patients, but got {num_patients}. We'll only plot what we have.")
@@ -167,17 +162,14 @@ def main():
         img_slice = image_data[:, :, slice_idx]
         pred_slice = predicted_masks[:, :, slice_idx]
 
-        # Overlay the prediction on the image
         axes[i].imshow(img_slice, cmap='gray', aspect='auto')
         overlay = np.zeros((*img_slice.shape, 3))
-        # Show predicted mask in red
-        overlay[pred_slice == 1] = [1, 0, 0]
+        overlay[pred_slice == 1] = [1, 0, 0]  # predicted mask in red
         axes[i].imshow(overlay, alpha=0.3, aspect='auto')
         axes[i].set_title(f'{patient_name}')
         axes[i].axis('off')
 
     plt.tight_layout()
-    # Save figure of all predictions
     bulk_plot_path = os.path.join(OUTPUT_DIR, 'all_15_patients_overlay.png')
     plt.savefig(bulk_plot_path)
     print(f"All 15 patients overlay plot saved at {bulk_plot_path}")

@@ -52,9 +52,12 @@ def load_nifti_image(nifti_path, target_spacing):
     voxel_spacing = (voxel_spacing[2], voxel_spacing[1], voxel_spacing[0])  # Convert to (Z, Y, X)
 
     data = data.astype(np.float32)
-    data = (data - np.min(data)) / (np.max(data) - np.min(data))
+    # Normalize to [0, 1]
+    p975 = np.percentile(data, 97.5)
+    data = np.clip(data, 0, p975)
+    data = data / p975
 
-    # Resample volume to target_spacing
+    # Resample volume to target_spacing (X, Y, Z)
     zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
@@ -140,10 +143,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # PATHS
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full/best_model.pth.tar'  # Update with your checkpoint path
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-975/checkpoint_epoch_10.pth.tar'
     TEST_PARIS_DIR = '../data/test_paris_data/'
     TEST_BELGIUM_DIR = '../data/test_belgium_data/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full/' # UPDATE
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-975'  # UPDATE
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Define target_spacing and desired_size
