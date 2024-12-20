@@ -8,7 +8,7 @@ from scipy.ndimage import zoom
 
 class SliceDataset(Dataset):
     # target_spacing now in (X, Y, Z)
-    def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(1.7188, 1.7188, 3.0)):
+    def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(1.75, 1.75, 3.0)):
         self.image_slices = []
         self.mask_slices = []
         self.desired_size = desired_size
@@ -66,7 +66,7 @@ class SliceDataset(Dataset):
             data = (data > 0).astype(np.float32)
         else:
             data = data.astype(np.float32)
-            p975 = np.percentile(data, 97.5)
+            p975 = np.percentile(data, 99)
             data = np.clip(data, 0, p975)
             data = data / p975
 
