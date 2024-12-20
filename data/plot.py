@@ -13,6 +13,8 @@ def load_and_view_middle_slice(nifti_path):
     try:
         # Load the NIfTI image
         nifti_image = nib.load(nifti_path)
+        header = nifti_image.header
+        print(nifti_image.shape)
 
         # Get the image data as a NumPy array
         image_data = nifti_image.get_fdata()
@@ -33,5 +35,5 @@ def load_and_view_middle_slice(nifti_path):
 
 # Example usage
 # Replace 'path_to_nifti_file.nii' with the actual path to your NIfTI file
-nifti_path = 'full_paris_data/001-0003/ mDIXON-Quant_BH.nii.gz'
+nifti_path = 'test_belgium_bulk/A1235/701_water_ax_idiq_bh_inspi_dos_l3.nii.gz'
 load_and_view_middle_slice(nifti_path)

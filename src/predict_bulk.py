@@ -43,7 +43,7 @@ def load_nifti_image(nifti_path, target_spacing=(1.7188, 1.7188, 3.0)):
 
     data = data.astype(np.float32)
     # Normalize to [0, 1]
-    p975 = np.percentile(data, 97.5)
+    p975 = np.percentile(data, 99)
     data = np.clip(data, 0, p975)
     data = data / p975
 
@@ -110,9 +110,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Update these paths accordingly:
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-975/checkpoint_epoch_10.pth.tar'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-994/best_model.pth.tar'
     TEST_BULK_DIR = '../data/test_belgium_bulk/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-975/bulk/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-994/bulk/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
