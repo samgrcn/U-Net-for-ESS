@@ -2,17 +2,12 @@ import os
 import torch
 import numpy as np
 import nibabel as nib
-from models.unet import UNet
+from src.models.unet import UNet3D
 from skimage.transform import resize
 from scipy.ndimage import zoom
 import matplotlib.pyplot as plt
 
 def get_bulk_image_paths(test_dir):
-    """
-    Scan through 'test_belgium_bulk/' directory.
-    For each patient directory, find a NIfTI image containing 'water' in its filename.
-    Returns: A list of tuples (patient_name, image_path)
-    """
     patient_dirs = [os.path.join(test_dir, d) for d in os.listdir(test_dir)
                     if os.path.isdir(os.path.join(test_dir, d))]
     image_paths = []
@@ -31,92 +26,97 @@ def get_bulk_image_paths(test_dir):
         image_paths.append((patient_name, image_path))
     return image_paths
 
-# Given (3.0, 1.7188, 1.7188) in Z,X,Y, convert to X,Y,Z = (1.7188, 1.7188, 3.0)
-def load_nifti_image(nifti_path, target_spacing=(1.7188, 1.7188, 3.0)):
+def load_nifti_image(nifti_path, target_spacing=(1.75, 1.75, 3.0), desired_size=(32, 128, 128)):
     img = nib.load(nifti_path)
     data = img.get_fdata()
     affine = img.affine
     header = img.header
 
-    # voxel_spacing = (X_spacing, Y_spacing, Z_spacing)
-    voxel_spacing = header.get_zooms()  # no reordering
+    original_shape = data.shape  # (X,Y,Z)
+    voxel_spacing = header.get_zooms()
 
     data = data.astype(np.float32)
-    # Normalize to [0, 1]
     p975 = np.percentile(data, 99)
-    data = np.clip(data, 0, p975)
-    data = data / p975
+    data = np.clip(data, 0, p975) / p975
 
-    # Resample volume to target_spacing (X, Y, Z)
     zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
         voxel_spacing[2] / target_spacing[2]
     )
-    data_resampled = zoom(data, zoom_factors, order=0)
+    data_resampled = zoom(data, zoom_factors, order=1)
+    resampled_shape = data_resampled.shape  # (X',Y',Z')
 
-    return data_resampled, affine
+    # (X',Y',Z') -> (Z',X',Y')
+    data_resampled = np.transpose(data_resampled, (2,0,1))
+
+    data_resized = resize(
+        data_resampled,
+        desired_size,
+        mode='reflect',
+        anti_aliasing=True
+    )
+    return data_resized, affine, original_shape, voxel_spacing, resampled_shape
 
 def load_model(checkpoint_path, device):
-    # Loading a 1-channel model
-    model = UNet(n_channels=1, n_classes=1, bilinear=True).to(device)
+    model = UNet3D(n_channels=1, n_classes=1, bilinear=True).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
     print("Model loaded successfully.")
     return model
 
-def predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5):
-    H, W, D = image_data.shape
-    predicted_masks = np.zeros((H, W, D), dtype=np.uint8)
+def predict_volume(model, image_data, device, threshold=0.5):
+    with torch.no_grad():
+        image_tensor = torch.from_numpy(image_data).unsqueeze(0).unsqueeze(0).float().to(device)
+        output = model(image_tensor)
+        prob = torch.sigmoid(output).cpu().numpy()[0,0]
+        predicted_mask = (prob > threshold).astype(np.uint8)
+    return predicted_mask
 
-    for i in range(D):
-        current_slice = image_data[:, :, i]
+def restore_original_geometry(pred_mask, desired_size, resampled_shape, original_shape, voxel_spacing, target_spacing, affine):
+    # Undo the steps as in predict.py
+    # pred_mask: (D,H,W) = (Z',X',Y')
+    pred_mask_resampled = resize(
+        pred_mask,
+        (resampled_shape[2], resampled_shape[0], resampled_shape[1]),
+        order=0,
+        preserve_range=True,
+        anti_aliasing=False
+    ).astype(np.uint8)
 
-        # Resize the current slice to desired_size
-        image_resized = resize(
-            current_slice,
-            desired_size,
-            mode='reflect',
-            anti_aliasing=True
-        )
+    # (Z',X',Y') -> (X',Y',Z')
+    pred_mask_resampled = np.transpose(pred_mask_resampled, (1, 2, 0))
 
-        # Add batch and channel dimensions for single-channel input
-        image_tensor = torch.from_numpy(image_resized).unsqueeze(0).unsqueeze(0).float().to(device)
+    # Inverse zoom
+    inverse_zoom_factors = (
+        voxel_spacing[0] / target_spacing[0],
+        voxel_spacing[1] / target_spacing[1],
+        voxel_spacing[2] / target_spacing[2]
+    )
+    pred_mask_original = zoom(pred_mask_resampled, inverse_zoom_factors, order=0).astype(np.uint8)
 
-        with torch.no_grad():
-            output = model(image_tensor)
+    # Ensure exact original shape
+    pred_mask_original = resize(
+        pred_mask_original,
+        original_shape,
+        order=0,
+        preserve_range=True,
+        anti_aliasing=False
+    ).astype(np.uint8)
 
-        probability_map = torch.sigmoid(output).cpu().numpy()[0, 0, :, :]
-        predicted_mask_resized = (probability_map > threshold).astype(np.uint8)
-
-        # Resize mask back to original slice size
-        predicted_mask_original_size = resize(
-            predicted_mask_resized,
-            (H, W),
-            order=0,
-            preserve_range=True,
-            anti_aliasing=False
-        ).astype(np.uint8)
-
-        predicted_masks[:, :, i] = predicted_mask_original_size
-
-        if (i + 1) % 10 == 0 or (i + 1) == D:
-            print(f"Processed slice {i+1}/{D}")
-
-    return predicted_masks
+    pred_nifti = nib.Nifti1Image(pred_mask_original.astype(np.float32), affine)
+    return pred_nifti
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Update these paths accordingly:
-    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet-voxel-full-994/best_model.pth.tar'
-    TEST_BULK_DIR = '../data/test_belgium_bulk/'
-    OUTPUT_DIR = 'outputs/predictions/Simple-Unet-voxel-full-994/bulk/'
+    CHECKPOINT_PATH = 'outputs/checkpoints/Simple-Unet3D-cropped-augment/best_model.pth.tar'
+    TEST_BULK_DIR = '../data/cropped_test_belgium_bulk/'
+    OUTPUT_DIR = 'outputs/predictions/Simple-Unet3D-cropped-augment/bulk/'
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     model = load_model(CHECKPOINT_PATH, device)
-
     bulk_images = get_bulk_image_paths(TEST_BULK_DIR)
     if not bulk_images:
         print("No 'water' images found in the bulk directory.")
@@ -128,15 +128,15 @@ def main():
 
     for patient_name, image_path in bulk_images:
         print(f"Predicting for patient: {patient_name}, image: {image_path}")
-        image_data, affine = load_nifti_image(image_path)
+        image_data, affine, original_shape, voxel_spacing, resampled_shape = load_nifti_image(image_path)
+        predicted_masks = predict_volume(model, image_data, device, threshold=0.5)
 
-        # Perform prediction
-        predicted_masks = predict_volume(model, image_data, device, desired_size=(256, 256), threshold=0.5)
+        pred_nifti = restore_original_geometry(
+            predicted_masks, (32, 128, 128), resampled_shape, original_shape, voxel_spacing, (1.75,1.75,3.0), affine
+        )
 
-        # Save predicted mask as NIfTI
         output_mask_path = os.path.join(OUTPUT_DIR, f'{patient_name}_pred_mask.nii.gz')
-        predicted_mask_nifti = nib.Nifti1Image(predicted_masks.astype(np.float32), affine)
-        nib.save(predicted_mask_nifti, output_mask_path)
+        nib.save(pred_nifti, output_mask_path)
         print(f"Predicted mask saved at {output_mask_path}")
 
         images_list.append(image_data)
@@ -145,34 +145,33 @@ def main():
 
     num_patients = len(images_list)
     if num_patients < 15:
-        print(f"Warning: Expected 15 patients, but got {num_patients}. We'll only plot what we have.")
+        print(f"Warning: Expected around 15 patients, got {num_patients}.")
 
     rows = 3
     cols = 5
     fig, axes = plt.subplots(rows, cols, figsize=(20, 12))
     axes = axes.ravel()
 
-    for i in range(num_patients):
+    for i in range(min(num_patients, 15)):
         image_data = images_list[i]
         predicted_masks = preds_list[i]
         patient_name = names_list[i]
 
-        # Middle slice index
-        slice_idx = image_data.shape[2] // 2
-        img_slice = image_data[:, :, slice_idx]
-        pred_slice = predicted_masks[:, :, slice_idx]
+        slice_idx = image_data.shape[0] // 2
+        img_slice = image_data[slice_idx,:,:]
+        pred_slice = predicted_masks[slice_idx,:,:]
 
         axes[i].imshow(img_slice, cmap='gray', aspect='auto')
         overlay = np.zeros((*img_slice.shape, 3))
-        overlay[pred_slice == 1] = [1, 0, 0]  # predicted mask in red
+        overlay[pred_slice == 1] = [1,0,0]
         axes[i].imshow(overlay, alpha=0.3, aspect='auto')
         axes[i].set_title(f'{patient_name}')
         axes[i].axis('off')
 
     plt.tight_layout()
-    bulk_plot_path = os.path.join(OUTPUT_DIR, 'all_15_patients_overlay.png')
+    bulk_plot_path = os.path.join(OUTPUT_DIR, 'all_patients_overlay.png')
     plt.savefig(bulk_plot_path)
-    print(f"All 15 patients overlay plot saved at {bulk_plot_path}")
+    print(f"Bulk overlay plot saved at {bulk_plot_path}")
 
     plt.show()
 

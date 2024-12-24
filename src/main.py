@@ -1,12 +1,11 @@
-# main.py
 import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from models.unet import UNet
-from datasets.dataset import SliceDataset
-from utils.utils import dice_coefficient
+from src.models.unet import UNet3D
+from src.datasets.dataset import VolumeDataset
+from src.utils.utils import dice_coefficient
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import logging
@@ -16,15 +15,14 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-BATCH_SIZE = 8
+BATCH_SIZE = 1
 NUM_EPOCHS = 30
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/paris_data/'  # Update this path to your patient folders
-
+PATIENT_DIR = '../data/cropped_paris_data/'  # Update this path to your patient folders
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if
@@ -58,7 +56,6 @@ def get_file_paths(patient_dir):
         mask_paths.append(mask_path)
     return image_paths, mask_paths
 
-
 # Get image and mask paths
 image_paths, mask_paths = get_file_paths(PATIENT_DIR)
 
@@ -69,14 +66,15 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
 
 # Chosen best voxel spacing (based on observed values)
 target_spacing = (1.75, 1.75, 3.0)
+desired_size = (32, 128, 128)  # (D, H, W) for training
 
 # Datasets
-train_dataset = SliceDataset(train_img_paths, train_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
-val_dataset = SliceDataset(val_img_paths, val_mask_paths, desired_size=(256, 256), target_spacing=target_spacing)
+train_dataset = VolumeDataset(train_img_paths, train_mask_paths, desired_size=desired_size, target_spacing=target_spacing, augment=True)
+val_dataset = VolumeDataset(val_img_paths, val_mask_paths, desired_size=desired_size, target_spacing=target_spacing, augment=False)
 
 # Data loaders
 train_loader = DataLoader(
-    train_dataset, batch_size=BATCH_SIZE, shuffle=False,
+    train_dataset, batch_size=BATCH_SIZE, shuffle=True,
     num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
 )
 val_loader = DataLoader(
@@ -85,21 +83,19 @@ val_loader = DataLoader(
 )
 
 # MODEL
-model = UNet(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
+model = UNet3D(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet-voxel-full-99-fine-noshuffle/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet3D-cropped-augment/'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
     filepath = os.path.join(CHECKPOINT_DIR, filename)
     torch.save(state, filepath)
     logging.info(f"Model checkpoint saved at {filepath}")
-
 
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
@@ -121,7 +117,6 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
 
     epoch_loss = running_loss / len(loader.dataset)
     return epoch_loss
-
 
 def evaluate(model, loader, criterion, device):
     model.eval()
@@ -146,7 +141,6 @@ def evaluate(model, loader, criterion, device):
     avg_loss = val_loss / len(loader.dataset)
     avg_dice = dice_score / len(loader.dataset)
     return avg_loss, avg_dice
-
 
 def main():
     best_val_dice = 0.0
@@ -208,7 +202,6 @@ def main():
     plt.savefig(plot_path)
     logging.info(f"Training plot saved at {plot_path}")
     plt.show()
-
 
 if __name__ == '__main__':
     main()
