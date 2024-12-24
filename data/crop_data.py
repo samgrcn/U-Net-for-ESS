@@ -70,8 +70,8 @@ def crop_image_fixed(image_data):
     """
     X, Y, Z = image_data.shape
 
-    x_start = int(X*0.20)
-    x_end = int(X*0.8) - 1
+    x_start = int(X*0.25)
+    x_end = int(X*0.75) - 1
 
     y_start = int(Y//2)
     y_end = Y - 1
