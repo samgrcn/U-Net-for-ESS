@@ -4,13 +4,13 @@ import numpy as np
 
 # Directories
 BASE_DIR = '../data/'
-PARIS_DIR = os.path.join(BASE_DIR, 'paris_data')
-TEST_PARIS_DIR = os.path.join(BASE_DIR, 'test_paris_data')
+PARIS_DIR = os.path.join(BASE_DIR, 'full_paris_data_cleaned')
+TEST_PARIS_DIR = os.path.join(BASE_DIR, 'test_full_paris_data')
 TEST_BELGIUM_DIR = os.path.join(BASE_DIR, 'test_belgium_data')
 TEST_BELGIUM_BULK_DIR = os.path.join(BASE_DIR, 'test_belgium_bulk')
 
-CROPPED_PARIS_DIR = os.path.join(BASE_DIR, 'cropped_paris_data')
-CROPPED_TEST_PARIS_DIR = os.path.join(BASE_DIR, 'cropped_test_paris_data')
+CROPPED_PARIS_DIR = os.path.join(BASE_DIR, 'cropped_full_paris_data_cleaned')
+CROPPED_TEST_PARIS_DIR = os.path.join(BASE_DIR, 'cropped_test_full_paris_data')
 CROPPED_TEST_BELGIUM_DIR = os.path.join(BASE_DIR, 'cropped_test_belgium_data')
 CROPPED_TEST_BELGIUM_BULK_DIR = os.path.join(BASE_DIR, 'cropped_test_belgium_bulk')
 
@@ -32,14 +32,14 @@ def find_image_file(files, require_mask=True):
     """
     if require_mask:
         # Looking for ' mDIXON-Quant_BH_v3.nii' or ' mDIXON-Quant_BH.nii'
-        for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii']:
+        for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii', 'fat.nii.gz', ' mDIXON-Quant_BH.nii.gz', ' mDIXON-Quant_BH_fat.nii.gz']:
             if fname in files:
                 return fname
         return None
     else:
         # For test_belgium_bulk, we look for a file containing 'water'
         for f in files:
-            if 'water' in f and (f.endswith('.nii') or f.endswith('.nii.gz')):
+            if 'fatfrac' in f and (f.endswith('.nii') or f.endswith('.nii.gz')):
                 return f
         return None
 
@@ -143,15 +143,15 @@ def process_directory(input_dir, output_dir, require_mask=True):
 
 if __name__ == "__main__":
     print("Cropping Paris data...")
-    process_directory(PARIS_DIR, CROPPED_PARIS_DIR, require_mask=True)
+    #process_directory(PARIS_DIR, CROPPED_PARIS_DIR, require_mask=False)
 
     print("Cropping Test Paris data...")
-    process_directory(TEST_PARIS_DIR, CROPPED_TEST_PARIS_DIR, require_mask=True)
+    #process_directory(TEST_PARIS_DIR, CROPPED_TEST_PARIS_DIR, require_mask=True)
 
     print("Cropping Test Belgium data...")
-    process_directory(TEST_BELGIUM_DIR, CROPPED_TEST_BELGIUM_DIR, require_mask=True)
+    process_directory(TEST_BELGIUM_DIR, CROPPED_TEST_BELGIUM_DIR, require_mask=False)
 
     print("Cropping Test Belgium Bulk data (no mask)...")
-    process_directory(TEST_BELGIUM_BULK_DIR, CROPPED_TEST_BELGIUM_BULK_DIR, require_mask=False)
+    #process_directory(TEST_BELGIUM_BULK_DIR, CROPPED_TEST_BELGIUM_BULK_DIR, require_mask=False)
 
     print("Cropping completed.")

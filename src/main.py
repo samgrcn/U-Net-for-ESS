@@ -3,93 +3,156 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from src.models.unet import UNet3D
-from src.datasets.dataset import VolumeDataset
-from src.utils.utils import dice_coefficient
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import logging
 import matplotlib.pyplot as plt
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# -----------------------------------------------------------------------------
+# Imports from your project (you may adjust relative paths)
+# -----------------------------------------------------------------------------
+from src.models.unet import UNet3D  # Make sure this is your 3D U-Net with n_channels=2
+from src.datasets.dataset import VolumeDataset  # Your dataset returning water, fat, and mask each shape (D,H,W)
+from src.utils.utils import dice_coefficient
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-BATCH_SIZE = 1
-NUM_EPOCHS = 30
+# -----------------------------------------------------------------------------
+# Hyperparameters
+# -----------------------------------------------------------------------------
+BATCH_SIZE = 2
+NUM_EPOCHS = 50
 LEARNING_RATE = 1e-3
 NUM_WORKERS = 4
 PIN_MEMORY = True
 
-# PATHS
-PATIENT_DIR = '../data/cropped_paris_data/'  # Update this path to your patient folders
+# -----------------------------------------------------------------------------
+# Paths
+# -----------------------------------------------------------------------------
+PATIENT_DIR = '../data/cropped_full_paris_data_cleaned/'  # Update to your folder containing the patients
 
-def get_file_paths(patient_dir):
-    patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if
-                     os.path.isdir(os.path.join(patient_dir, d))]
-    image_paths = []
+def get_file_paths_2chan(patient_dir):
+    """
+    Returns three lists:
+       - water_image_paths
+       - fat_image_paths
+       - mask_paths
+    for all patients in 'patient_dir'.
+
+    The function expects:
+        - Water image named ' mDIXON-Quant_BH_v3.nii'
+                               or ' mDIXON-Quant_BH.nii'
+                               or ' mDIXON-Quant_BH.nii.gz'
+          (with the leading space).
+        - Fat image named 'fat.nii.gz'
+        - Mask image named 'erector.nii' or 'erector.nii.gz'
+    """
+    patient_paths = [
+        os.path.join(patient_dir, d)
+        for d in os.listdir(patient_dir)
+        if os.path.isdir(os.path.join(patient_dir, d))
+    ]
+
+    water_paths = []
+    fat_paths = []
     mask_paths = []
+
     for patient_path in patient_paths:
         files_in_patient = os.listdir(patient_path)
-        image_file = None
-        for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii', ' mDIXON-Quant_BH.nii.gz']:
-            if fname in files_in_patient:
-                image_file = fname
+
+        # -- Water
+        water_file = None
+        for wname in [' mDIXON-Quant_BH_v3.nii',
+                      ' mDIXON-Quant_BH.nii',
+                      ' mDIXON-Quant_BH.nii.gz']:
+            if wname in files_in_patient:
+                water_file = wname
                 break
-        if image_file is None:
-            print(f"No image file found in {patient_path}")
+        if water_file is None:
+            print(f"No water file found in {patient_path}, skipping.")
             continue
+        water_path = os.path.join(patient_path, water_file)
 
-        image_path = os.path.join(patient_path, image_file)
+        # -- Fat
+        fat_file = 'fat.nii.gz'
+        if fat_file not in files_in_patient:
+            print(f"No fat file found in {patient_path}, skipping.")
+            continue
+        fat_path = os.path.join(patient_path, fat_file)
 
+        # -- Mask
         mask_file = None
         for mname in ['erector.nii', 'erector.nii.gz']:
             if mname in files_in_patient:
                 mask_file = mname
                 break
         if mask_file is None:
-            print(f"No mask file found in {patient_path}")
+            print(f"No mask file found in {patient_path}, skipping.")
             continue
-
         mask_path = os.path.join(patient_path, mask_file)
-        image_paths.append(image_path)
+
+        water_paths.append(water_path)
+        fat_paths.append(fat_path)
         mask_paths.append(mask_path)
-    return image_paths, mask_paths
 
-# Get image and mask paths
-image_paths, mask_paths = get_file_paths(PATIENT_DIR)
+    return water_paths, fat_paths, mask_paths
 
-# Split data
-train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_split(
-    image_paths, mask_paths, test_size=0.2, random_state=42
+# -----------------------------------------------------------------------------
+# Data Preparation
+# -----------------------------------------------------------------------------
+water_paths, fat_paths, mask_paths = get_file_paths_2chan(PATIENT_DIR)
+
+(
+    train_water_paths, val_water_paths,
+    train_fat_paths,   val_fat_paths,
+    train_mask_paths,  val_mask_paths
+) = train_test_split(
+    water_paths, fat_paths, mask_paths,
+    test_size=0.2, random_state=42
 )
 
-# Chosen best voxel spacing (based on observed values)
 target_spacing = (1.75, 1.75, 3.0)
-desired_size = (32, 128, 128)  # (D, H, W) for training
+desired_size = (32, 128, 128)  # (D, H, W)
 
-# Datasets
-train_dataset = VolumeDataset(train_img_paths, train_mask_paths, desired_size=desired_size, target_spacing=target_spacing, augment=True)
-val_dataset = VolumeDataset(val_img_paths, val_mask_paths, desired_size=desired_size, target_spacing=target_spacing, augment=False)
+train_dataset = VolumeDataset(
+    train_water_paths, train_fat_paths, train_mask_paths,
+    desired_size=desired_size,
+    target_spacing=target_spacing,
+    augment=True
+)
+val_dataset = VolumeDataset(
+    val_water_paths, val_fat_paths, val_mask_paths,
+    desired_size=desired_size,
+    target_spacing=target_spacing,
+    augment=False
+)
 
-# Data loaders
 train_loader = DataLoader(
-    train_dataset, batch_size=BATCH_SIZE, shuffle=True,
-    num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
+    train_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=True,
+    num_workers=NUM_WORKERS,
+    pin_memory=PIN_MEMORY
 )
 val_loader = DataLoader(
-    val_dataset, batch_size=BATCH_SIZE, shuffle=False,
-    num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY
+    val_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=False,
+    num_workers=NUM_WORKERS,
+    pin_memory=PIN_MEMORY
 )
 
-# MODEL
-model = UNet3D(n_channels=1, n_classes=1, bilinear=True).to(DEVICE)
+# -----------------------------------------------------------------------------
+# Model, Loss, Optimizer, Scheduler
+# -----------------------------------------------------------------------------
+model = UNet3D(n_channels=2, n_classes=1, bilinear=True).to(DEVICE)
 
 criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
-CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet3D-cropped-augment/'
+CHECKPOINT_DIR = 'outputs/checkpoints/Simple-Unet3D-cropped-augment-99-2channel/'
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
@@ -97,22 +160,37 @@ def save_checkpoint(state, filename='checkpoint.pth.tar'):
     torch.save(state, filepath)
     logging.info(f"Model checkpoint saved at {filepath}")
 
+# -----------------------------------------------------------------------------
+# Training & Validation
+# -----------------------------------------------------------------------------
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     loop = tqdm(loader, total=len(loader))
-    for images, masks in loop:
-        images = images.to(device)
+
+    for water, fat, masks in loop:
+        # water, fat, masks => shape (B, D, H, W) from VolumeDataset
+        water = water.to(device)
+        fat   = fat.to(device)
         masks = masks.to(device)
 
-        outputs = model(images)
+        # Unsqueeze channel dimension => (B,1,D,H,W)
+        water = water.unsqueeze(1)
+        fat   = fat.unsqueeze(1)
+        masks = masks.unsqueeze(1)
+
+        # Combine water+fat => (B,2,D,H,W)
+        inputs = torch.cat([water, fat], dim=1)
+
+        outputs = model(inputs)  # (B,1,D,H,W)
         loss = criterion(outputs, masks)
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item() * images.size(0)
-        loop.set_description(f"Training")
+        running_loss += loss.item() * water.size(0)
+        loop.set_description("Training")
         loop.set_postfix(loss=loss.item())
 
     epoch_loss = running_loss / len(loader.dataset)
@@ -122,26 +200,38 @@ def evaluate(model, loader, criterion, device):
     model.eval()
     val_loss = 0.0
     dice_score = 0.0
+
     with torch.no_grad():
         loop = tqdm(loader, total=len(loader))
-        for images, masks in loop:
-            images = images.to(device)
+        for water, fat, masks in loop:
+            water = water.to(device)
+            fat   = fat.to(device)
             masks = masks.to(device)
 
-            outputs = model(images)
+            # Unsqueeze channel dimension
+            water = water.unsqueeze(1)
+            fat   = fat.unsqueeze(1)
+            masks = masks.unsqueeze(1)
+
+            inputs = torch.cat([water, fat], dim=1)
+            outputs = model(inputs)
+
             loss = criterion(outputs, masks)
-            val_loss += loss.item() * images.size(0)
+            val_loss += loss.item() * water.size(0)
 
             dice = dice_coefficient(outputs, masks)
-            dice_score += dice.item() * images.size(0)
+            dice_score += dice.item() * water.size(0)
 
-            loop.set_description(f"Validation")
+            loop.set_description("Validation")
             loop.set_postfix(loss=loss.item(), dice=dice.item())
 
     avg_loss = val_loss / len(loader.dataset)
     avg_dice = dice_score / len(loader.dataset)
     return avg_loss, avg_dice
 
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 def main():
     best_val_dice = 0.0
     train_losses = []
@@ -162,6 +252,7 @@ def main():
 
         scheduler.step(val_loss)
 
+        # Save best model
         if val_dice > best_val_dice:
             best_val_dice = val_dice
             save_checkpoint({
@@ -171,6 +262,7 @@ def main():
                 'val_dice': val_dice,
             }, filename='best_model.pth.tar')
 
+        # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -182,6 +274,7 @@ def main():
     # Plotting
     epochs = range(1, NUM_EPOCHS + 1)
     plt.figure(figsize=(12, 5))
+
     plt.subplot(1, 2, 1)
     plt.plot(epochs, train_losses, 'b', label='Training loss')
     plt.plot(epochs, val_losses, 'r', label='Validation loss')

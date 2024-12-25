@@ -30,7 +30,7 @@ def flip_nifti_image(input_path):
 
 def main():
     # Define the base directory
-    base_dir = 'test_full_paris_data'
+    base_dir = 'cropped_test_paris_data'
 
     # Iterate through subfolders in the base directory
     for subfolder in os.listdir(base_dir):
