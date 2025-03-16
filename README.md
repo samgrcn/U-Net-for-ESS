@@ -1,2 +1,2 @@
 # U-Net-for-ESS
-Designing a U-Net model to segment Erector Spinae
+Generalizing Erector Spinae Segmentation accross MRI machines
