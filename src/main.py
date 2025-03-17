@@ -22,7 +22,7 @@ NUM_WORKERS = 4
 PIN_MEMORY = True
 
 # PATHS
-PATIENT_DIR = '../data/cropped_paris_data/'  # Update this path to your patient folders
+PATIENT_DIR = '../data/cropped_paris_data/'
 
 def get_file_paths(patient_dir):
     patient_paths = [os.path.join(patient_dir, d) for d in os.listdir(patient_dir) if
@@ -64,9 +64,8 @@ train_img_paths, val_img_paths, train_mask_paths, val_mask_paths = train_test_sp
     image_paths, mask_paths, test_size=0.2, random_state=42
 )
 
-# Chosen best voxel spacing (based on observed values)
 target_spacing = (1.75, 1.75, 3.0)
-desired_size = (32, 128, 128)  # (D, H, W) for training
+desired_size = (32, 128, 128)
 
 # Datasets
 train_dataset = VolumeDataset(train_img_paths, train_mask_paths, desired_size=desired_size, target_spacing=target_spacing, augment=True)

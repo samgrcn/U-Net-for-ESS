@@ -75,8 +75,7 @@ def predict_volume(model, image_data, device, threshold=0.5):
     return predicted_mask
 
 def restore_original_geometry(pred_mask, desired_size, resampled_shape, original_shape, voxel_spacing, target_spacing, affine):
-    # Undo the steps as in predict.py
-    # pred_mask: (D,H,W) = (Z',X',Y')
+
     pred_mask_resampled = resize(
         pred_mask,
         (resampled_shape[2], resampled_shape[0], resampled_shape[1]),
@@ -85,7 +84,6 @@ def restore_original_geometry(pred_mask, desired_size, resampled_shape, original
         anti_aliasing=False
     ).astype(np.uint8)
 
-    # (Z',X',Y') -> (X',Y',Z')
     pred_mask_resampled = np.transpose(pred_mask_resampled, (1, 2, 0))
 
     # Inverse zoom
@@ -96,7 +94,6 @@ def restore_original_geometry(pred_mask, desired_size, resampled_shape, original
     )
     pred_mask_original = zoom(pred_mask_resampled, inverse_zoom_factors, order=0).astype(np.uint8)
 
-    # Ensure exact original shape
     pred_mask_original = resize(
         pred_mask_original,
         original_shape,

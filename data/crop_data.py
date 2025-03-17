@@ -31,13 +31,11 @@ def find_image_file(files, require_mask=True):
     If require_mask is False, this likely is the test_belgium_bulk, so we look for 'water' in the filename.
     """
     if require_mask:
-        # Looking for ' mDIXON-Quant_BH_v3.nii' or ' mDIXON-Quant_BH.nii'
         for fname in [' mDIXON-Quant_BH_v3.nii', ' mDIXON-Quant_BH.nii']:
             if fname in files:
                 return fname
         return None
     else:
-        # For test_belgium_bulk, we look for a file containing 'water'
         for f in files:
             if 'water' in f and (f.endswith('.nii') or f.endswith('.nii.gz')):
                 return f
@@ -105,7 +103,6 @@ def process_directory(input_dir, output_dir, require_mask=True):
         img_path = os.path.join(p_dir, img_name)
         image_data, affine, header = load_nifti(img_path)
 
-        # Crop image
         cropped_image, crop_info = crop_image_fixed(image_data)
         _, (X, Y, Z, x_start, x_end, y_start, y_end, z_start, z_end) = (None, crop_info)
 
@@ -115,10 +112,8 @@ def process_directory(input_dir, output_dir, require_mask=True):
 
         out_img_path = os.path.join(out_patient_dir, img_name)
 
-        # Save cropped image
         save_nifti(cropped_image, affine, out_img_path)
 
-        # If we require a mask, handle that
         if require_mask:
             mask_name = find_mask_file(files)
             if mask_name is None:
@@ -131,7 +126,6 @@ def process_directory(input_dir, output_dir, require_mask=True):
             out_mask_path = os.path.join(out_patient_dir, 'erector.nii')
             save_nifti(cropped_mask, affine, out_mask_path)
 
-        # Save crop info
         crop_txt_path = os.path.join(out_patient_dir, 'crop_info.txt')
         with open(crop_txt_path, 'w') as f:
             f.write("Original Shape: {} {} {}\n".format(X, Y, Z))

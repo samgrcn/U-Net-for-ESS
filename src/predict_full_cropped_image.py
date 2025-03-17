@@ -8,7 +8,6 @@ BASE_DIR = '../data/'
 TEST_BULK_DIR = os.path.join(BASE_DIR, 'test_belgium_bulk')
 CROPPED_TEST_BELGIUM_DIR = os.path.join(BASE_DIR, 'cropped_test_belgium_bulk')
 
-# Predictions directory from the model trained on cropped data
 PRED_DIR = 'outputs/predictions/Unet-3ch-voxel-box/bulk'
 
 def get_bulk_image_paths(test_dir):
@@ -48,12 +47,6 @@ def read_crop_info(patient_id):
     with open(crop_info_path, 'r') as f:
         lines = f.readlines()
 
-    # Parse lines
-    # Example lines:
-    # Original Shape: X Y Z
-    # x_start: a, x_end: b
-    # y_start: c, y_end: d
-    # z_start: e, z_end: f
     orig_shape_line = lines[0].strip().split(":")[1].strip().split()
     X, Y, Z = int(orig_shape_line[0]), int(orig_shape_line[1]), int(orig_shape_line[2])
 
@@ -73,28 +66,20 @@ def read_crop_info(patient_id):
 
 def main():
     bulk_images = get_bulk_image_paths(TEST_BULK_DIR)
-    # Assuming we have 15 patients
-    # If not exactly 15, we'll plot what we have
+
     if not bulk_images:
         print("No images found in test_belgium_bulk.")
         return
 
-    # Sort by patient name if needed for consistent ordering
     bulk_images.sort(key=lambda x: x[0])
 
     images_list = []
     preds_list = []
     names_list = []
 
-    # Load original images and predicted cropped masks, then reconstruct
     for patient_name, image_path in bulk_images:
-        # Load original full-size image
         full_image_data, affine = load_nifti(image_path)
 
-        # Predicted cropped mask path
-        # The predicted mask files should be something like '<patient_name>_pred_mask.nii.gz'
-        # from the PRED_DIR. We need to ensure predict_bulk.py saved them with a naming convention
-        # that we know. Let's assume they are named 'patient_name_pred_mask.nii.gz' as in the original code.
         pred_mask_name = f'{patient_name}_pred_mask.nii.gz'
         pred_mask_path = os.path.join(PRED_DIR, pred_mask_name)
 
@@ -104,14 +89,11 @@ def main():
 
         cropped_pred_data, _ = load_nifti(pred_mask_path)
 
-        # Read cropping info
         X, Y, Z, x_start, x_end, y_start, y_end, z_start, z_end = read_crop_info(patient_name)
 
-        # Recreate full-size mask from cropped predicted mask
         full_pred_mask = np.zeros((X, Y, Z), dtype=np.float32)
         full_pred_mask[x_start:x_end+1, y_start:y_end+1, z_start:z_end+1] = cropped_pred_data
 
-        # Store for plotting
         images_list.append(full_image_data)
         preds_list.append(full_pred_mask)
         names_list.append(patient_name)
@@ -131,14 +113,12 @@ def main():
         predicted_masks = preds_list[i]
         patient_name = names_list[i]
 
-        # Middle slice index
         slice_idx = image_data.shape[2] // 2
         img_slice = image_data[:, :, slice_idx]
         pred_slice = predicted_masks[:, :, slice_idx]
 
         axes[i].imshow(img_slice, cmap='gray', aspect='auto')
         overlay = np.zeros((*img_slice.shape, 3), dtype=np.float32)
-        # Show predicted mask in red
         overlay[pred_slice > 0.5] = [1, 0, 0]
         axes[i].imshow(overlay, alpha=0.3, aspect='auto')
         axes[i].set_title(f'{patient_name}')

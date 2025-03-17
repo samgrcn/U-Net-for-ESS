@@ -53,19 +53,15 @@ def load_nifti_image(nifti_path, target_spacing, desired_size):
     p975 = np.percentile(data, 99)
     data = np.clip(data, 0, p975) / p975
 
-    # Compute zoom factors to get from original spacing to target spacing
     zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
         voxel_spacing[2] / target_spacing[2]
     )
-    # Resample to target spacing
     data_resampled = zoom(data, zoom_factors, order=1)
-    resampled_shape = data_resampled.shape  # (X',Y',Z')
+    resampled_shape = data_resampled.shape
 
-    # Transpose to (Z',X',Y')
     data_resampled = np.transpose(data_resampled, (2, 0, 1))
-    # data_resampled now (D,H,W) = desired_size after resize
     data_resized = resize(
         data_resampled,
         desired_size,
@@ -88,8 +84,7 @@ def load_nifti_mask(nifti_path, target_spacing, desired_size):
         voxel_spacing[1] / target_spacing[1],
         voxel_spacing[2] / target_spacing[2]
     )
-    mask_resampled = zoom(data, zoom_factors, order=0)  # mask with NN interpolation
-    # (X',Y',Z')
+    mask_resampled = zoom(data, zoom_factors, order=0)
     mask_resampled = np.transpose(mask_resampled, (2, 0, 1))
 
     mask_resized = resize(
@@ -120,24 +115,16 @@ def predict_volume(model, image_data, device, threshold=0.5):
     return predicted_mask
 
 def restore_original_geometry(pred_mask, desired_size, resampled_shape, original_shape, voxel_spacing, target_spacing, affine):
-    # pred_mask currently (D,H,W) = (Z',X',Y')
-    # Step 1: Resize back from desired_size to resampled_shape
-    # First transpose to (Z',X',Y') -> currently pred_mask is in that order,
-    # but we need to confirm the order we applied resize on was (D,H,W) = (Z',X',Y')
-    # We resized from (Z',X',Y') to desired_size, so now we resize back:
     pred_mask_resampled = resize(
         pred_mask,
-        (resampled_shape[2], resampled_shape[0], resampled_shape[1]),  # (Z',X',Y')
+        (resampled_shape[2], resampled_shape[0], resampled_shape[1]),
         order=0,
         preserve_range=True,
         anti_aliasing=False
     ).astype(np.uint8)
 
-    # Now pred_mask_resampled is (Z',X',Y'), transpose back to (X',Y',Z')
     pred_mask_resampled = np.transpose(pred_mask_resampled, (1, 2, 0))
 
-    # Step 2: Zoom back to original spacing
-    # Inverse zoom factors
     inverse_zoom_factors = (
         voxel_spacing[0] / target_spacing[0],
         voxel_spacing[1] / target_spacing[1],
@@ -146,9 +133,6 @@ def restore_original_geometry(pred_mask, desired_size, resampled_shape, original
 
     pred_mask_original = zoom(pred_mask_resampled, inverse_zoom_factors, order=0).astype(np.uint8)
 
-    # pred_mask_original should now be close to original_shape (X,Y,Z)
-    # To ensure exact original_shape, we can crop or pad if slight differences occur:
-    # Just in case of rounding differences:
     pred_mask_original = resize(
         pred_mask_original,
         original_shape,
@@ -157,7 +141,6 @@ def restore_original_geometry(pred_mask, desired_size, resampled_shape, original
         anti_aliasing=False
     ).astype(np.uint8)
 
-    # Now pred_mask_original should match original shape and orientation (X,Y,Z)
     pred_nifti = nib.Nifti1Image(pred_mask_original.astype(np.float32), affine)
     return pred_nifti
 
@@ -178,7 +161,6 @@ def main():
     paris_image_paths, paris_mask_paths = get_test_data_paths(TEST_PARIS_DIR, has_masks=True)
     belgium_image_paths, belgium_mask_paths = get_test_data_paths(TEST_BELGIUM_DIR, has_masks=True)
 
-    # Just take first 4
     paris_image_paths = paris_image_paths[:4]
     paris_mask_paths = paris_mask_paths[:4]
     belgium_image_paths = belgium_image_paths[:4]
@@ -190,7 +172,6 @@ def main():
         mask_data = load_nifti_mask(mask_path, target_spacing, desired_size)
         predicted_mask = predict_volume(model, image_data, device, threshold=0.5)
 
-        # Restore original geometry
         pred_nifti = restore_original_geometry(
             predicted_mask, desired_size, resampled_shape, original_shape, voxel_spacing, target_spacing, affine
         )

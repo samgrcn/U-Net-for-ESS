@@ -7,7 +7,6 @@ from skimage.transform import resize
 from scipy.ndimage import zoom
 
 class SliceDataset(Dataset):
-    # target_spacing now in (X, Y, Z)
     def __init__(self, image_paths, mask_paths, desired_size=(256, 256), target_spacing=(1.75, 1.75, 3.0)):
         self.image_slices = []
         self.mask_slices = []
@@ -29,7 +28,6 @@ class SliceDataset(Dataset):
         image = self.image_slices[idx]
         mask = self.mask_slices[idx]
 
-        # Resize image and mask to desired_size
         image = resize(
             image,
             self.desired_size,
@@ -44,11 +42,9 @@ class SliceDataset(Dataset):
             anti_aliasing=False
         )
 
-        # Add channel dimension
         image = np.expand_dims(image, axis=0)
         mask = np.expand_dims(mask, axis=0)
 
-        # Convert to tensors
         image = torch.from_numpy(image).float()
         mask = torch.from_numpy(mask).float()
 
@@ -58,8 +54,7 @@ class SliceDataset(Dataset):
         img = nib.load(nifti_path)
         data = img.get_fdata()
         header = img.header
-        # Data shape: (X, Y, Z)
-        voxel_spacing = header.get_zooms()  # (X_spacing, Y_spacing, Z_spacing)
+        voxel_spacing = header.get_zooms()
 
         if is_mask:
             data = data.astype(np.float32)
@@ -70,17 +65,14 @@ class SliceDataset(Dataset):
             data = np.clip(data, 0, p975)
             data = data / p975
 
-        # Compute zoom factors based on (X, Y, Z) order
         zoom_factors = (
-            voxel_spacing[0] / self.target_spacing[0],  # X
-            voxel_spacing[1] / self.target_spacing[1],  # Y
-            voxel_spacing[2] / self.target_spacing[2]   # Z
+            voxel_spacing[0] / self.target_spacing[0],  
+            voxel_spacing[1] / self.target_spacing[1],  
+            voxel_spacing[2] / self.target_spacing[2]   
         )
 
-        # Resample volume
         data_resampled = zoom(data, zoom_factors, order=1 if not is_mask else 0)
 
-        # Extract slices along Z-axis
         slices = [data_resampled[:, :, i] for i in range(data_resampled.shape[2])]
         return slices
 
@@ -99,7 +91,7 @@ class VolumeDataset(Dataset):
     def __init__(self, image_paths, mask_paths, desired_size=(32, 128, 128), target_spacing=(1.75, 1.75, 3.0), augment=True):
         self.image_paths = image_paths
         self.mask_paths = mask_paths
-        self.desired_size = desired_size  # (D, H, W)
+        self.desired_size = desired_size
         self.target_spacing = target_spacing
         self.augment = augment
 
@@ -115,7 +107,6 @@ class VolumeDataset(Dataset):
         if self.augment:
             image, mask = self.random_augmentations(image, mask)
 
-        # Add channel dimension: (C, D, H, W)
         image = np.expand_dims(image, axis=0)
         mask = np.expand_dims(mask, axis=0)
 
@@ -129,7 +120,7 @@ class VolumeDataset(Dataset):
         img = nib.load(image_path)
         data = img.get_fdata()
         header = img.header
-        voxel_spacing = header.get_zooms()  # (X_spacing, Y_spacing, Z_spacing)
+        voxel_spacing = header.get_zooms()
 
         data = data.astype(np.float32)
         p975 = np.percentile(data, 99)
@@ -140,7 +131,6 @@ class VolumeDataset(Dataset):
         mdata = mimg.get_fdata().astype(np.float32)
         mdata = (mdata > 0).astype(np.float32)
 
-        # Resample volume based on spacing
         zoom_factors = (
             voxel_spacing[0] / self.target_spacing[0],
             voxel_spacing[1] / self.target_spacing[1],
@@ -149,11 +139,9 @@ class VolumeDataset(Dataset):
         data_resampled = zoom(data, zoom_factors, order=1)
         mask_resampled = zoom(mdata, zoom_factors, order=0)
 
-        # reorder to (D,H,W)
         data_resampled = np.transpose(data_resampled, (2, 0, 1))
         mask_resampled = np.transpose(mask_resampled, (2, 0, 1))
 
-        # Resize to desired_size (D,H,W)
         data_resized = resize(
             data_resampled,
             self.desired_size,
@@ -171,18 +159,15 @@ class VolumeDataset(Dataset):
         return data_resized, mask_resized
 
     def random_augmentations(self, image, mask):
-        # Apply small Gaussian blur with some probability
         if random.random() < 0.5:
-            sigma = random.uniform(0, 1.0)  # small blur
+            sigma = random.uniform(0, 1.0)
             image = gaussian_filter(image, sigma=sigma)
 
-        # Small intensity scaling (brightness changes)
         if random.random() < 0.5:
             scale_factor = random.uniform(0.9, 1.1)
             image = image * scale_factor
             image = np.clip(image, 0, 1.0)
 
-        # Small random shift in D,H,W direction
         if random.random() < 0.5:
             max_shift = 5  # voxels
             shift_d = random.randint(-max_shift, max_shift)
